@@ -1,27 +1,12 @@
-import type {
-  ChannelName,
-  ImageAnalyzeResponse,
-  PngCarrier,
-} from "@/lib/contracts/types";
+import type { ImageAnalyzeResponse } from "@/lib/contracts/types";
 import { decodePng, encodePng } from "@/lib/media/png";
 import { imageMetrics } from "@/lib/analysis/image";
 import { rgbHistogram } from "@/lib/analysis/histogram";
-import { lsbPlane } from "@/lib/analysis/lsb-plane";
+import { lsbPlane, lsbPlaneCombined } from "@/lib/analysis/lsb-plane";
 import { ApiError } from "@/lib/contracts/errors";
 import { jsonOk, runHandler, toBase64 } from "@/lib/api/http";
 
 export const runtime = "nodejs";
-
-const CHANNELS: ChannelName[] = ["r", "g", "b"];
-
-async function lsbThumbnails(carrier: PngCarrier) {
-  const result = {} as Record<ChannelName, string>;
-  for (const channel of CHANNELS) {
-    const plane = lsbPlane(carrier, channel);
-    result[channel] = toBase64(await encodePng(plane));
-  }
-  return result;
-}
 
 export async function POST(request: Request) {
   return runHandler(async () => {
@@ -38,9 +23,21 @@ export async function POST(request: Request) {
     const response: ImageAnalyzeResponse = {
       metrics: imageMetrics(cover, stego),
       histograms: { cover: rgbHistogram(cover), stego: rgbHistogram(stego) },
-      lsbThumbnails: {
-        cover: await lsbThumbnails(cover),
-        stego: await lsbThumbnails(stego),
+      lsbCombined: {
+        cover: toBase64(await encodePng(lsbPlaneCombined(cover))),
+        stego: toBase64(await encodePng(lsbPlaneCombined(stego))),
+      },
+      lsbChannels: {
+        cover: {
+          r: toBase64(await encodePng(lsbPlane(cover, 0))),
+          g: toBase64(await encodePng(lsbPlane(cover, 1))),
+          b: toBase64(await encodePng(lsbPlane(cover, 2))),
+        },
+        stego: {
+          r: toBase64(await encodePng(lsbPlane(stego, 0))),
+          g: toBase64(await encodePng(lsbPlane(stego, 1))),
+          b: toBase64(await encodePng(lsbPlane(stego, 2))),
+        },
       },
     };
 

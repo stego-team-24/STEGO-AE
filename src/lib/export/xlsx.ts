@@ -13,6 +13,10 @@ export interface ExportRow extends TestResult {
   filename?: string | null;
   mediaMeta?: string | null;
   messageBytes?: number | null;
+  compressedFilename?: string | null;
+  compressedBytes?: number | null;
+  restoredFilename?: string | null;
+  restoredBytes?: number | null;
 }
 
 export interface XlsxOptions {
@@ -84,6 +88,10 @@ export async function buildXlsx(options: XlsxOptions): Promise<Blob> {
     { header: "run_id", key: "runId", width: 38 },
     { header: "media", key: "media", width: 10 },
     { header: "filename", key: "filename", width: 28 },
+    { header: "compressed_file", key: "compressedFilename", width: 30 },
+    { header: "compressed_bytes", key: "compressedBytes", width: 18 },
+    { header: "restored_file", key: "restoredFilename", width: 30 },
+    { header: "restored_bytes", key: "restoredBytes", width: 18 },
     { header: "media_meta", key: "mediaMeta", width: 26 },
     { header: "message_bytes", key: "messageBytes", width: 14 },
     { header: "test", key: "test", width: 12 },
@@ -104,6 +112,10 @@ export async function buildXlsx(options: XlsxOptions): Promise<Blob> {
       runId: safeText(row.runId),
       media: row.media,
       filename: safeText(row.filename),
+      compressedFilename: safeText(row.compressedFilename),
+      compressedBytes: numericCell(row.compressedBytes),
+      restoredFilename: safeText(row.restoredFilename),
+      restoredBytes: numericCell(row.restoredBytes),
       mediaMeta: safeText(row.mediaMeta),
       messageBytes: numericCell(row.messageBytes),
       test: row.test,
@@ -129,6 +141,10 @@ export async function buildXlsx(options: XlsxOptions): Promise<Blob> {
     ["run_id", "Unique identifier for one experiment row."],
     ["media", "image or audio."],
     ["filename", "Source media filename (a literal string, never a formula)."],
+    ["compressed_file", "Intermediate compressed artifact produced by the selected attack."],
+    ["compressed_bytes", "Compressed artifact size in bytes."],
+    ["restored_file", "Restored PNG or WAV artifact used for the final extraction."],
+    ["restored_bytes", "Restored artifact size in bytes."],
     ["media_meta", "Image dimensions or audio sample rate/channels/frames/bit depth."],
     ["message_bytes", "UTF-8 byte length of the embedded plaintext, when known."],
     ["test", "baseline, jpeg or flac."],

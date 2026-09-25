@@ -192,10 +192,8 @@ export interface ImageAnalyzeResponse {
     cover: RgbHistogram;
     stego: RgbHistogram;
   };
-  lsbThumbnails: {
-    cover: Record<ChannelName, string>;
-    stego: Record<ChannelName, string>;
-  };
+  lsbCombined: { cover: string; stego: string };
+  lsbChannels: { cover: Record<ChannelName, string>; stego: Record<ChannelName, string> };
 }
 
 export type ChannelName = "r" | "g" | "b";
@@ -206,9 +204,12 @@ export interface AudioAnalyzeResponse {
   metrics: Metrics;
   changedSamples: number;
   totalSamples: number;
+  meanAbsoluteError: number;
+  maxAbsoluteError: number;
   waveform: {
     cover: number[];
     stego: number[];
+    changedRate: number[];
   };
 }
 

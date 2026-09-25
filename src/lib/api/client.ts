@@ -10,6 +10,7 @@ import type {
   FlacRoundTrip,
   ImageAnalyzeResponse,
   ImageEmbedResponse,
+  Metrics,
   PngInfo,
   TestResult,
   WavInfo,
@@ -52,6 +53,33 @@ function formWithFile(file: File, extra: Record<string, string> = {}): FormData 
   form.set("file", file);
   for (const [key, value] of Object.entries(extra)) form.set(key, value);
   return form;
+}
+
+export interface MediaArtifact {
+  name: string;
+  mime: string;
+  size: number;
+  base64: string;
+}
+
+export function compressImageArtifact(file: File, quality: number) {
+  return postForm<{ artifact: MediaArtifact; parameter: number }>("/api/image/pipeline/compress", formWithFile(file, { quality: String(quality) }));
+}
+
+export function restoreImageArtifact(compressed: File, source: File) {
+  const form = formWithFile(compressed);
+  form.set("source", source);
+  return postForm<{ artifact: MediaArtifact; metrics: Metrics }>("/api/image/pipeline/restore", form);
+}
+
+export function compressAudioArtifact(file: File, level: number) {
+  return postForm<{ artifact: MediaArtifact; playback: MediaArtifact; parameter: number }>("/api/audio/pipeline/compress", formWithFile(file, { level: String(level) }));
+}
+
+export function restoreAudioArtifact(compressed: File, source: File) {
+  const form = formWithFile(compressed);
+  form.set("source", source);
+  return postForm<{ artifact: MediaArtifact; metrics: Metrics; pcmIdentical: boolean }>("/api/audio/pipeline/restore", form);
 }
 
 export function inspectImage(file: File) {
@@ -116,4 +144,130 @@ export function analyzeAudio(cover: File, stego: File) {
   form.set("cover", cover);
   form.set("stego", stego);
   return postForm<AudioAnalyzeResponse>("/api/audio/analyze", form);
+}
+
+export interface MapSummary {
+  id: string;
+  title: string;
+  authorName: string;
+  gridSize: number;
+  templateId: string;
+  walls: [number, number][];
+  entryBriefing: string;
+  createdAt: string;
+  clueCount: number;
+}
+
+export interface ClueDetail {
+  id: string;
+  nodeOrder: number;
+  coordX: number;
+  coordY: number;
+  mediaType: "IMAGE" | "AUDIO";
+  mediaUrl: string;
+  coverMediaUrl: string;
+  passphrase: string;
+  secretOutput: string;
+  psnrDb: number | null;
+  mse: number | null;
+}
+
+export interface MapDetail {
+  id: string;
+  title: string;
+  authorName: string;
+  gridSize: number;
+  templateId: string;
+  walls: [number, number][];
+  entryBriefing: string;
+  entranceX: number;
+  entranceY: number;
+  treasureX: number;
+  treasureY: number;
+  shadows: { x: number; y: number }[];
+  createdAt: string;
+  clues: ClueDetail[];
+}
+
+export interface ClueInput {
+  nodeOrder: number;
+  coordX: number;
+  coordY: number;
+  mediaType: "IMAGE" | "AUDIO";
+  message: string;
+  passphrase: string;
+  cover: File;
+}
+
+export interface PublishInput {
+  title: string;
+  authorName: string;
+  templateId: string;
+  gridSize: number;
+  walls: [number, number][];
+  entryBriefing: string;
+  entranceX: number;
+  entranceY: number;
+  treasureX: number;
+  treasureY: number;
+  shadows: { x: number; y: number }[];
+  clues: ClueInput[];
+}
+
+export function publishMap(input: PublishInput) {
+  const form = new FormData();
+  form.set("title", input.title);
+  form.set("authorName", input.authorName);
+  form.set("templateId", input.templateId);
+  form.set("gridSize", String(input.gridSize));
+  form.set("walls", JSON.stringify(input.walls));
+  form.set("entryBriefing", input.entryBriefing);
+  form.set("entranceX", String(input.entranceX));
+  form.set("entranceY", String(input.entranceY));
+  form.set("treasureX", String(input.treasureX));
+  form.set("treasureY", String(input.treasureY));
+  form.set("shadows", JSON.stringify(input.shadows));
+  form.set(
+    "clues",
+    JSON.stringify(
+      input.clues.map((clue) => ({
+        nodeOrder: clue.nodeOrder,
+        coordX: clue.coordX,
+        coordY: clue.coordY,
+        mediaType: clue.mediaType,
+        message: clue.message,
+        passphrase: clue.passphrase,
+      })),
+    ),
+  );
+  input.clues.forEach((clue, index) => form.set(`cover_${index}`, clue.cover));
+  return postForm<{ id: string; title: string; clueCount: number }>("/api/maps", form);
+}
+
+export async function fetchMap(id: string): Promise<MapDetail> {
+  const response = await fetch(`/api/maps/${id}`);
+  if (!response.ok) {
+    throw new ApiClientError("Map not found.", null, null, response.status);
+  }
+  return (await response.json()) as MapDetail;
+}
+
+export async function extractClue(id: string, passphrase: string): Promise<ExtractResponse> {
+  const response = await fetch(`/api/clues/${id}/extract`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ passphrase }),
+  });
+  const data = (await response.json().catch(() => null)) as
+    | { error?: { message?: string; code?: string } }
+    | null;
+  if (!response.ok) {
+    throw new ApiClientError(
+      data?.error?.message ?? "Extraction failed.",
+      data?.error?.code ?? null,
+      null,
+      response.status,
+    );
+  }
+  return data as ExtractResponse;
 }

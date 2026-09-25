@@ -1,29 +1,36 @@
-# STEGO-AE — Stay Gold After Encryption
+# STEGO-AE — Phantom Protocol
 
-Full-stack web app for **encrypted information hiding in PNG images and WAV
-audio** using the LSB algorithm. UTS demo for Information Security, Universitas
-Siliwangi.
+*Stay Gold After Encryption — Interactive Steganographic Labyrinth Puzzle Engine.*
 
-- Embed a text message encrypted with AES-256-GCM into PNG or WAV.
-- Extract it back with the correct passphrase.
-- Measure image/audio quality (MSE, PSNR, RGB histogram, enhanced LSB).
-- Test JPEG fragility (image) and FLAC losslessness (audio).
-- Export experiment results as XLSX.
+A full-stack Next.js game that wraps encrypted steganography (AES-256-GCM +
+keyed LSB) in a 15×15 labyrinth puzzle. UTS demo for Information Security,
+Universitas Siliwangi.
+
+- Build a 15×15 palace in the **Palace Architect**: place an entrance, treasure,
+  sequential clue nodes and shadow guards, then hide a message inside each
+  clue's PNG/WAV media.
+- Infiltrate it in **Phantom Infiltration**: explore a fog-of-war labyrinth,
+  solve clues by extracting hidden messages, trigger the alarm, and escape.
+- Audit the cryptography in the **Velvet Room**: MSE/PSNR, RGB histograms,
+  enhanced LSB, JPEG/FLAC attacks and the 15-run dataset report (XLSX).
 
 ## Stack
 
-Next.js (App Router) · TypeScript · Tailwind CSS · Zod · sharp · wavefile ·
-libflac.js · ExcelJS · Vitest.
+Next.js (App Router) · TypeScript · Tailwind CSS · PostgreSQL · Prisma ·
+sharp · wavefile · libflac.js · ExcelJS · Vitest.
 
 ## Requirements
 
 - Node.js 24 (see `.nvmrc`)
 - npm
+- PostgreSQL (local dev) or a Railway PostgreSQL URL
 
 ## Getting started
 
 ```bash
-npm install
+cp .env.example .env      # then set DATABASE_URL
+npm install               # runs `prisma generate` via postinstall
+npm run db:push           # create the tables (Prisma)
 npm run dev
 ```
 
@@ -31,24 +38,20 @@ Open http://localhost:3000.
 
 ### NixOS
 
-Dengan Nix flakes aktif, masuk ke development shell proyek:
+The project `flake.nix` provides Node 24 plus `prisma-engines` and sets the
+engine env vars. Enter the shell first, then create the database and push:
 
 ```bash
 nix develop
+# (first time) create the database over the Unix socket:
+psql -h /run/postgresql -U shiend -d postgres -c "CREATE DATABASE stego_ae;"
 npm install
+npm run db:push
 npm run dev
 ```
 
-`flake.nix` menyediakan Node.js 24, npm, dan tool native yang dibutuhkan oleh
-`sharp` serta pemrosesan FLAC. Dependensi JavaScript tetap dipasang dari
-`package-lock.json`.
-
-Production fallback for the demo (no external services needed after install):
-
-```bash
-npm run build
-npm start
-```
+For a local NixOS PostgreSQL over the Unix socket, use:
+`DATABASE_URL="postgresql://shiend@localhost:5432/stego_ae?host=/run/postgresql"`.
 
 ## Scripts
 
@@ -60,31 +63,24 @@ npm start
 | `npm test` | Unit tests (Vitest) |
 | `npm run lint` | ESLint |
 | `npm run typecheck` | TypeScript check |
+| `npm run db:push` | Sync Prisma schema to the database |
 
-## Demo flow (7 minutes)
+## Pages
 
-1. **Home** — concept and two workspaces.
-2. **Image / Embedding** — choose PNG, write message, set passphrase, download stego.
-3. **Image / Extraction** — recover text with the right passphrase, fail safely with the wrong one.
-4. **Image / Analysis Lab** — pairwise MSE/PSNR, RGB histogram, enhanced LSB, plus a
-   dataset batch (5 images × 3 message sizes = 15 runs) with XLSX export.
-5. **Image / Compression Attack** — JPEG Q90/70/50 fragility test, per-row results, XLSX export.
-6. **Audio / Embedding & Lossless Test** — WAV embed, FLAC round-trip with PCM integrity.
-7. **XLSX** — export from either compression page.
+- `/login` — visual auth gate (bypass enabled) → Palace Lobby.
+- `/maps` — list of palaces; infiltrate or create a new one.
+- `/builder` — Palace Architect: 15×15 grid, template, nodes, publish.
+- `/play/[id]` — Phantom Infiltration: fog of war, clues, alarm chase, victory.
+- `/velvet-room` — Forensic audit console (manual attack, pair analysis,
+  15-run dataset, XLSX export).
 
-## Format limits
+## Crypto engine (reused from the original PRD)
 
-- One upload ≤ 25 MiB.
-- PNG: any color type or bit depth, up to 1920×1920 (FHD and smaller).
-  Everything is normalized to 8-bit RGB/RGBA for the LSB carrier.
-- WAV: any RIFF/RIFX WAVE that wavefile can read (any sample rate, channels,
-  integer or float bit depth). Samples are normalized to 16-bit PCM.
-- Message: 1–32,768 UTF-8 bytes (further limited by media capacity).
-- Passphrase: 12–128 characters.
-
-Files are processed in memory only; there is no database, no history, and no
-permanent storage. Refreshing clears the temporary workspace. Authentication is
-a placeholder and never stores credentials.
+- 44-byte public header (`SGAE`, v1, KDF/iteration fields, salt, nonce) embedded
+  in the first 352 carrier positions.
+- PBKDF2-SHA256 (600k) → HKDF → `K_enc` (AES-256-GCM) and `K_pos` (position PRNG).
+- Fisher-Yates shuffle over the remaining carriers, driven by `K_pos`.
+- Payload spread as LSB bits; header authenticated as GCM AAD.
 
 ## Architecture
 
@@ -92,29 +88,33 @@ a placeholder and never stores credentials.
 src/
   app/               UI routes and /api/* route handlers
   components/        shared UI (layout, forms, media, analysis, feedback)
-  features/          embed / extract / analysis / compression flows
-  context/           in-memory session
+  features/          builder / game / velvet-room flows
   lib/
     crypto/          PBKDF2 + HKDF, AES-256-GCM, keystream PRNG
     stego/           header v1, LSB bits, keyed positions, capacity
     media/           PNG (sharp), WAV (wavefile), JPEG, FLAC
     analysis/        MSE/PSNR, histogram, LSB plane, audio
     engine/          embed / extract orchestration
-    contracts/       types, validation schemas, error contract
     export/          XLSX export
+    contracts/       types, validation schemas, error contract
+    templates.ts     hardcoded 15×15 labyrinth templates
+    db.ts            Prisma client (pg driver adapter)
+prisma/schema.prisma Map + ClueNode models
 ```
 
-The payload format is a 44-byte public header (`SGAE`, v1, KDF/iteration
-fields, salt, nonce) embedded sequentially in the first 352 carrier positions,
-followed by the encrypted payload spread over the remaining carriers with a
-keyed Fisher-Yates shuffle.
+## Deploying to Railway
 
-## Notes and deviations
+1. Create a PostgreSQL service; copy its `DATABASE_URL`.
+2. Set `DATABASE_URL` in the app's environment.
+3. Build runs `prisma generate` via `postinstall`; run `npm run db:push`
+   (or `prisma migrate deploy`) once to create tables.
 
-- FLAC encode/decode runs in the Node runtime (libflac.js) rather than a
-  browser Worker, because bundling the emscripten runtime under Next.js 16 /
-  Turbopack proved fragile. This is a documented fallback allowed by the PRD;
-  the PCM bit-exact integrity contract is unchanged.
+## Notes
+
+- FLAC encode/decode runs in the Node runtime (libflac.js), not a browser
+  Worker — a documented fallback; the PCM bit-exact contract is unchanged.
+- Media (cover + stego) is stored as binary in the database, so Railway's
+  ephemeral filesystem is not a concern.
 
 ## Team
 

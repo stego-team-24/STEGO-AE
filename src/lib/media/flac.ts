@@ -41,6 +41,16 @@ export interface FlacRoundTripOutput {
   decoded: Int16Array;
 }
 
+export async function decodeFlacBytes(flacBytes: Uint8Array): Promise<Int16Array> {
+  const flac = await loadFlac();
+  const { Decoder } = nodeRequire("libflacjs/lib/decoder");
+  const decoder = new Decoder(flac, { verify: true, isOgg: false });
+  decoder.decode(flacBytes);
+  const interleaved: Uint8Array = decoder.getSamples(true);
+  decoder.destroy();
+  return new Int16Array(interleaved.buffer, interleaved.byteOffset, interleaved.byteLength / 2);
+}
+
 export async function flacRoundTrip(
   samples: Int16Array,
   sampleRate: number,
@@ -51,7 +61,6 @@ export async function flacRoundTrip(
   const flac = await loadFlac();
 
   const { Encoder } = nodeRequire("libflacjs/lib/encoder");
-  const { Decoder } = nodeRequire("libflacjs/lib/decoder");
   const { exportFlacData } = nodeRequire("libflacjs/lib/utils");
 
   const i32 = new Int32Array(samples.length);
@@ -73,16 +82,7 @@ export async function flacRoundTrip(
   const flacBytes: Uint8Array = await exportFlacData(encoder.rawData, metadata, false);
   encoder.destroy();
 
-  const decoder = new Decoder(flac, { verify: true, isOgg: false });
-  decoder.decode(flacBytes);
-  const interleaved: Uint8Array = decoder.getSamples(true);
-  decoder.destroy();
-
-  const decoded = new Int16Array(
-    interleaved.buffer,
-    interleaved.byteOffset,
-    interleaved.byteLength / 2,
-  );
+  const decoded = await decodeFlacBytes(flacBytes);
 
   return { flacBytes, decoded };
 }

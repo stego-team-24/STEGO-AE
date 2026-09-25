@@ -1,7 +1,7 @@
 import type { AudioAnalyzeResponse } from "@/lib/contracts/types";
 import { ApiError } from "@/lib/contracts/errors";
 import { decodeWav } from "@/lib/media/wav";
-import { audioMetrics, waveformPreview } from "@/lib/analysis/audio";
+import { audioMetrics, changeRatePreview, waveformPreview } from "@/lib/analysis/audio";
 import { jsonOk, runHandler } from "@/lib/api/http";
 
 export const runtime = "nodejs";
@@ -20,15 +20,18 @@ export async function POST(request: Request) {
     const cover = decodeWav(new Uint8Array(await coverFile.arrayBuffer()));
     const stego = decodeWav(new Uint8Array(await stegoFile.arrayBuffer()));
 
-    const { metrics, changedSamples, totalSamples } = audioMetrics(cover, stego);
+    const { metrics, changedSamples, totalSamples, meanAbsoluteError, maxAbsoluteError } = audioMetrics(cover, stego);
 
     const response: AudioAnalyzeResponse = {
       metrics,
       changedSamples,
       totalSamples,
+      meanAbsoluteError,
+      maxAbsoluteError,
       waveform: {
         cover: waveformPreview(cover, WAVEFORM_BUCKETS),
         stego: waveformPreview(stego, WAVEFORM_BUCKETS),
+        changedRate: changeRatePreview(cover, stego, WAVEFORM_BUCKETS),
       },
     };
 

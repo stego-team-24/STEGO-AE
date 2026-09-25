@@ -12,6 +12,8 @@ export interface AudioComparison {
   metrics: Metrics;
   changedSamples: number;
   totalSamples: number;
+  meanAbsoluteError: number;
+  maxAbsoluteError: number;
 }
 
 /** Sample rate, channels, bit depth and frame count must all match. */
@@ -33,10 +35,14 @@ export function audioMetrics(cover: WavCarrier, stego: WavCarrier): AudioCompari
 
   let sum = 0;
   let changedSamples = 0;
+  let absoluteSum = 0;
+  let maxAbsoluteError = 0;
   for (let i = 0; i < totalSamples; i += 1) {
     const d = cover.samples[i] - stego.samples[i];
     if (d !== 0) changedSamples += 1;
     sum += d * d;
+    absoluteSum += Math.abs(d);
+    maxAbsoluteError = Math.max(maxAbsoluteError, Math.abs(d));
   }
 
   const mse = sum / totalSamples;
@@ -44,6 +50,8 @@ export function audioMetrics(cover: WavCarrier, stego: WavCarrier): AudioCompari
     metrics: { mse, psnrDb: psnrFromMse(mse, PCM_PEAK), identical: mse === 0 },
     changedSamples,
     totalSamples,
+    meanAbsoluteError: absoluteSum / totalSamples,
+    maxAbsoluteError,
   };
 }
 
@@ -56,21 +64,33 @@ export function samplesIdentical(a: Int16Array, b: Int16Array): boolean {
   return true;
 }
 
-/** Amplitude envelope for display only, one value per bucket in [0, 1]. */
+/** RMS amplitude per display bucket, normalized to [0, 1]. */
 export function waveformPreview(carrier: WavCarrier, buckets: number): number[] {
   const totalSamples = carrier.frames * carrier.channels;
-  const envelope = new Array<number>(buckets).fill(0);
-  const perBucket = Math.max(1, Math.ceil(totalSamples / buckets));
+  const sums = new Array<number>(buckets).fill(0);
+  const counts = new Array<number>(buckets).fill(0);
+  const perBucket = Math.ceil(totalSamples / buckets);
 
   for (let i = 0; i < totalSamples; i += 1) {
     const bucket = Math.min(buckets - 1, Math.floor(i / perBucket));
-    const amplitude = Math.abs(carrier.samples[i]);
-    if (amplitude > envelope[bucket]) envelope[bucket] = amplitude;
+    const sample = carrier.samples[i] / PCM_PEAK;
+    sums[bucket] += sample * sample;
+    counts[bucket] += 1;
   }
 
-  for (let b = 0; b < buckets; b += 1) {
-    envelope[b] = envelope[b] / PCM_PEAK;
-  }
+  return sums.map((sum, bucket) => counts[bucket] === 0 ? 0 : Math.sqrt(sum / counts[bucket]));
+}
 
-  return envelope;
+/** Fraction of samples changed in each time bucket. */
+export function changeRatePreview(cover: WavCarrier, stego: WavCarrier, buckets: number): number[] {
+  const totalSamples = cover.frames * cover.channels;
+  const changed = new Array<number>(buckets).fill(0);
+  const counts = new Array<number>(buckets).fill(0);
+  const perBucket = Math.ceil(totalSamples / buckets);
+  for (let index = 0; index < totalSamples; index += 1) {
+    const bucket = Math.min(buckets - 1, Math.floor(index / perBucket));
+    if (cover.samples[index] !== stego.samples[index]) changed[bucket] += 1;
+    counts[bucket] += 1;
+  }
+  return changed.map((value, bucket) => counts[bucket] === 0 ? 0 : value / counts[bucket]);
 }

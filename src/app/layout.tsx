@@ -1,24 +1,22 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { AppShell } from "@/components/layout/AppShell";
-import { SessionProvider } from "@/context/session";
+import { GameHeader } from "@/components/layout/GameHeader";
 
 export const metadata: Metadata = {
   title: {
-    default: "STEGO-AE — Stay Gold After Encryption",
-    template: "%s · STEGO-AE",
+    default: "STEGO-AE — Phantom Protocol",
+    template: "%s · Phantom Protocol",
   },
   description:
-    "Encrypted information hiding in PNG images and WAV audio using the LSB algorithm. UTS Information Security demo, Universitas Siliwangi.",
+    "Interactive steganographic labyrinth puzzle engine. Encrypted information hiding in PNG and WAV using LSB. UTS Information Security demo.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className="h-full">
       <body className="min-h-full">
-        <SessionProvider>
-          <AppShell>{children}</AppShell>
-        </SessionProvider>
+        <GameHeader />
+        <main className="mx-auto w-full max-w-[1200px] px-6 py-8">{children}</main>
       </body>
     </html>
   );

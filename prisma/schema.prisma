@@ -1,0 +1,49 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Map {
+  id          String     @id @default(uuid())
+  title       String
+  authorName  String
+  gridSize    Int        @default(15)
+  templateId  String
+  walls       Json       @default("[]")
+  entryBriefing String   @default("")
+  entranceX   Int
+  entranceY   Int
+  treasureX   Int
+  treasureY   Int
+  shadows     Json       @default("[]")
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  clueNodes   ClueNode[]
+}
+
+model ClueNode {
+  id           String    @id @default(uuid())
+  mapId        String
+  map          Map       @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  nodeOrder    Int
+  coordX       Int
+  coordY       Int
+  mediaType    MediaType
+  mediaMime    String
+  coverData    Bytes
+  mediaData    Bytes
+  passphrase   String
+  secretOutput String
+  psnrDb       Float?
+  mse          Float?
+  createdAt    DateTime  @default(now())
+}
+
+enum MediaType {
+  IMAGE
+  AUDIO
+}

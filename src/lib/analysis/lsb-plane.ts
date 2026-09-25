@@ -2,25 +2,31 @@
  * Enhanced LSB bit plane. Reference: PRD section 6 (F-03).
  */
 
-import type { ChannelName, PngCarrier } from "@/lib/contracts/types";
+import type { PngCarrier } from "@/lib/contracts/types";
 
-export const DEFAULT_LSB_CHANNEL: ChannelName = "b";
-
-const CHANNEL_INDEX: Record<ChannelName, number> = { r: 0, g: 1, b: 2 };
-
-export function lsbPlane(carrier: PngCarrier, channel: ChannelName): PngCarrier {
+/** Show all three LSB planes together as RGB instead of splitting channels. */
+export function lsbPlaneCombined(carrier: PngCarrier): PngCarrier {
   const { width, height, channels, data } = carrier;
-  const channelIndex = CHANNEL_INDEX[channel];
   const out = new Uint8Array(width * height * 3);
-
-  const pixelCount = width * height;
-  for (let p = 0; p < pixelCount; p += 1) {
-    const value = (data[p * channels + channelIndex] & 1) === 0 ? 0 : 255;
-    const base = p * 3;
-    out[base] = value;
-    out[base + 1] = value;
-    out[base + 2] = value;
+  for (let pixel = 0; pixel < width * height; pixel += 1) {
+    const source = pixel * channels;
+    const target = pixel * 3;
+    out[target] = (data[source] & 1) ? 255 : 0;
+    out[target + 1] = (data[source + 1] & 1) ? 255 : 0;
+    out[target + 2] = (data[source + 2] & 1) ? 255 : 0;
   }
+  return { width, height, channels: 3, data: out };
+}
 
+export function lsbPlane(carrier: PngCarrier, channel: 0 | 1 | 2): PngCarrier {
+  const { width, height, channels, data } = carrier;
+  const out = new Uint8Array(width * height * 3);
+  for (let pixel = 0; pixel < width * height; pixel += 1) {
+    const value = (data[pixel * channels + channel] & 1) ? 255 : 0;
+    const target = pixel * 3;
+    out[target] = value;
+    out[target + 1] = value;
+    out[target + 2] = value;
+  }
   return { width, height, channels: 3, data: out };
 }
