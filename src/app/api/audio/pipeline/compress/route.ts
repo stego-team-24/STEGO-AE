@@ -1,7 +1,8 @@
-import { flacLevelSchema, parseOrThrow, readField } from "@/lib/contracts/schemas";
+import { audioCompressionFormatSchema, parseOrThrow, readField } from "@/lib/contracts/schemas";
 import { jsonOk, readUpload, runHandler, toBase64 } from "@/lib/api/http";
 import { decodeWav, encodeWav } from "@/lib/media/wav";
 import { flacRoundTrip } from "@/lib/media/flac";
+import { decodeMp3ToCarrier, encodeMp3, MP3_BITRATE_KBPS } from "@/lib/media/mp3";
 
 export const runtime = "nodejs";
 
@@ -9,14 +10,22 @@ export async function POST(request: Request) {
   return runHandler(async () => {
     const form = await request.formData();
     const { file, bytes } = await readUpload(form);
-    const level = parseOrThrow(flacLevelSchema, readField(form, "level"), "level");
+    const format = parseOrThrow(audioCompressionFormatSchema, readField(form, "format"), "format");
     const wav = decodeWav(bytes);
-    const { flacBytes, decoded } = await flacRoundTrip(wav.samples, wav.sampleRate, wav.channels, 16, level);
-    const playbackBytes = encodeWav({ ...wav, samples: decoded });
+    const { artifactBytes, decodedSamples } = format === "flac"
+      ? await flacRoundTrip(wav.samples, wav.sampleRate, wav.channels, 16, 5).then(({ flacBytes, decoded }) => ({ artifactBytes: flacBytes, decodedSamples: decoded }))
+      : await encodeMp3(wav).then(async (mp3Bytes) => {
+          const decoded = await decodeMp3ToCarrier(mp3Bytes, wav);
+          return { artifactBytes: mp3Bytes, decodedSamples: decoded.samples };
+        });
+    const playbackBytes = encodeWav({ ...wav, samples: decodedSamples });
+    const extension = format === "flac" ? "flac" : "mp3";
+    const mime = format === "flac" ? "audio/flac" : "audio/mpeg";
     return jsonOk({
-      artifact: { name: file.name.split(".").slice(0, -1).join(".") + `-level${level}.flac`, mime: "audio/flac", size: flacBytes.length, base64: toBase64(flacBytes) },
-      playback: { name: "flac-decoded-preview.wav", mime: "audio/wav", size: playbackBytes.length, base64: toBase64(playbackBytes) },
-      parameter: level,
+      artifact: { name: file.name.split(".").slice(0, -1).join(".") + `.${extension}`, mime, size: artifactBytes.length, base64: toBase64(artifactBytes) },
+      playback: { name: `${file.name.split(".").slice(0, -1).join(".")}-decoded-preview.wav`, mime: "audio/wav", size: playbackBytes.length, base64: toBase64(playbackBytes) },
+      parameter: format === "flac" ? 5 : MP3_BITRATE_KBPS,
+      format,
     });
   });
 }

@@ -13,7 +13,7 @@ export type Media = "image" | "audio";
 /** Result of an extraction attempt. PASS/FAIL describe the message; ERROR is an execution failure. */
 export type ExtractionStatus = "PASS" | "FAIL" | "ERROR" | "NOT_RUN";
 
-export type TestKind = "baseline" | "jpeg" | "flac";
+export type TestKind = "baseline" | "jpeg" | "webp" | "flac" | "mp3";
 
 /**
  * Quality metrics for a cover/stego pair.
@@ -28,12 +28,12 @@ export interface Metrics {
   identical: boolean;
 }
 
-/** One row of an experiment (baseline embed, JPEG attack or FLAC round-trip). */
+/** One baseline or selected JPEG/WebP/FLAC/MP3 compression result. */
 export interface TestResult {
   runId: string;
   media: Media;
   test: TestKind;
-  /** JPEG quality, FLAC level, baseline message size, or `null`. */
+  /** Fixed codec setting (image quality, FLAC effort, MP3 bitrate), or `null`. */
   parameter: number | null;
   inputBytes: number;
   outputBytes: number | null;

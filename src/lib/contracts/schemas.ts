@@ -56,6 +56,9 @@ export const flacLevelSchema = z.coerce
     `FLAC level must be one of ${flacLevels.join(", ")}.`,
   );
 
+export const imageCompressionFormatSchema = z.enum(["jpeg", "webp"]);
+export const audioCompressionFormatSchema = z.enum(["flac", "mp3"]);
+
 /** Parse a value or raise an `ApiError` carrying the offending field name. */
 export function parseOrThrow<T extends z.ZodType>(
   schema: T,

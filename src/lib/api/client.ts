@@ -7,7 +7,6 @@ import type {
   AudioAnalyzeResponse,
   AudioEmbedResponse,
   ExtractResponse,
-  FlacRoundTrip,
   ImageAnalyzeResponse,
   ImageEmbedResponse,
   Metrics,
@@ -62,8 +61,8 @@ export interface MediaArtifact {
   base64: string;
 }
 
-export function compressImageArtifact(file: File, quality: number) {
-  return postForm<{ artifact: MediaArtifact; parameter: number }>("/api/image/pipeline/compress", formWithFile(file, { quality: String(quality) }));
+export function compressImageArtifact(file: File, format: "jpeg" | "webp") {
+  return postForm<{ artifact: MediaArtifact; parameter: number; format: "jpeg" | "webp" }>("/api/image/pipeline/compress", formWithFile(file, { format }));
 }
 
 export function restoreImageArtifact(compressed: File, source: File) {
@@ -72,8 +71,8 @@ export function restoreImageArtifact(compressed: File, source: File) {
   return postForm<{ artifact: MediaArtifact; metrics: Metrics }>("/api/image/pipeline/restore", form);
 }
 
-export function compressAudioArtifact(file: File, level: number) {
-  return postForm<{ artifact: MediaArtifact; playback: MediaArtifact; parameter: number }>("/api/audio/pipeline/compress", formWithFile(file, { level: String(level) }));
+export function compressAudioArtifact(file: File, format: "flac" | "mp3") {
+  return postForm<{ artifact: MediaArtifact; playback: MediaArtifact; parameter: number; format: "flac" | "mp3" }>("/api/audio/pipeline/compress", formWithFile(file, { format }));
 }
 
 export function restoreAudioArtifact(compressed: File, source: File) {
@@ -107,10 +106,10 @@ export function analyzeImage(cover: File, stego: File) {
   return postForm<ImageAnalyzeResponse>("/api/image/analyze", form);
 }
 
-export function compressImage(file: File, passphrase: string, quality: number) {
+export function compressImage(file: File, passphrase: string, format: "jpeg" | "webp") {
   return postForm<TestResult>(
     "/api/image/compress",
-    formWithFile(file, { passphrase, quality: String(quality) }),
+    formWithFile(file, { passphrase, format }),
   );
 }
 
@@ -132,10 +131,10 @@ export function extractAudio(file: File, passphrase: string) {
   );
 }
 
-export function compressAudio(file: File, passphrase: string, level: number) {
-  return postForm<FlacRoundTrip>(
+export function compressAudio(file: File, passphrase: string, format: "flac" | "mp3") {
+  return postForm<TestResult>(
     "/api/audio/flac",
-    formWithFile(file, { passphrase, level: String(level) }),
+    formWithFile(file, { passphrase, format }),
   );
 }
 

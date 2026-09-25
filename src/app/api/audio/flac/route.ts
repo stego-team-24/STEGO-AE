@@ -1,8 +1,8 @@
-import crypto from "node:crypto";
-import type { FlacRoundTrip, Metrics, WavCarrier } from "@/lib/contracts/types";
+import type { Metrics, TestResult } from "@/lib/contracts/types";
 import { ApiError } from "@/lib/contracts/errors";
 import {
   flacLevelSchema,
+  audioCompressionFormatSchema,
   parseOrThrow,
   passphraseSchema,
   readField,
@@ -11,6 +11,7 @@ import { decodeWav } from "@/lib/media/wav";
 import { flacRoundTrip } from "@/lib/media/flac";
 import { audioMetrics, samplesIdentical } from "@/lib/analysis/audio";
 import { extractAudioPayload } from "@/lib/engine/extract";
+import { decodeMp3ToCarrier, encodeMp3, MP3_BITRATE_KBPS } from "@/lib/media/mp3";
 import { createRunId, jsonOk, readUpload, runHandler } from "@/lib/api/http";
 
 export const runtime = "nodejs";
@@ -24,7 +25,8 @@ export async function POST(request: Request) {
       readField(form, "passphrase"),
       "passphrase",
     );
-    const level = parseOrThrow(flacLevelSchema, readField(form, "level"), "level");
+    const format = parseOrThrow(audioCompressionFormatSchema, form.get("format") ?? "flac", "format");
+    const level = format === "flac" ? parseOrThrow(flacLevelSchema, form.get("level") ?? "5", "level") : MP3_BITRATE_KBPS;
 
     const cover = decodeWav(bytes);
 
@@ -35,36 +37,22 @@ export async function POST(request: Request) {
     let outputBytes: number | null = null;
     let metrics: Metrics | null = null;
     let pcmIdentical: boolean | null = null;
-    let status: FlacRoundTrip["extractionStatus"] = "NOT_RUN";
+    let status: TestResult["extractionStatus"] = "NOT_RUN";
     let errorCode: string | null = null;
-    let sha256Before = "";
-    let sha256After = "";
-
-    const pcmHash = (samples: Int16Array) =>
-      crypto
-        .createHash("sha256")
-        .update(Buffer.from(samples.buffer, samples.byteOffset, samples.byteLength))
-        .digest("hex");
-
     try {
-      sha256Before = pcmHash(cover.samples);
-      const { flacBytes, decoded } = await flacRoundTrip(
-        cover.samples,
-        cover.sampleRate,
-        cover.channels,
-        16,
-        level,
-      );
-      outputBytes = flacBytes.length;
-      sha256After = pcmHash(decoded);
+      let encoded: Uint8Array;
+      let decodedCarrier;
+      if (format === "flac") {
+        const result = await flacRoundTrip(cover.samples, cover.sampleRate, cover.channels, 16, level);
+        encoded = result.flacBytes;
+        decodedCarrier = { ...cover, samples: result.decoded };
+      } else {
+        encoded = await encodeMp3(cover);
+        decodedCarrier = await decodeMp3ToCarrier(encoded, cover);
+      }
+      outputBytes = encoded.length;
+      const decoded = decodedCarrier.samples;
       pcmIdentical = samplesIdentical(cover.samples, decoded);
-
-      const decodedCarrier: WavCarrier = {
-        sampleRate: cover.sampleRate,
-        channels: cover.channels,
-        frames: cover.frames,
-        samples: decoded,
-      };
       metrics = audioMetrics(cover, decodedCarrier).metrics;
 
       try {
@@ -83,10 +71,10 @@ export async function POST(request: Request) {
       errorCode = "CODEC_ERROR";
     }
 
-    const result: FlacRoundTrip = {
+    const result: TestResult = {
       runId: createRunId(),
       media: "audio",
-      test: "flac",
+      test: format,
       parameter: level,
       inputBytes: bytes.length,
       outputBytes,
@@ -95,8 +83,6 @@ export async function POST(request: Request) {
       extractionStatus: status,
       elapsedMs: Math.round(performance.now() - started),
       errorCode,
-      sha256Before,
-      sha256After,
     };
 
     return jsonOk(result);

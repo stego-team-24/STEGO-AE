@@ -1,13 +1,13 @@
 import type { Metrics, TestResult } from "@/lib/contracts/types";
 import { ApiError } from "@/lib/contracts/errors";
 import {
-  jpegQualitySchema,
+  imageCompressionFormatSchema,
   parseOrThrow,
   passphraseSchema,
   readField,
 } from "@/lib/contracts/schemas";
 import { decodePng } from "@/lib/media/png";
-import { decodeJpegToRgb, encodeJpeg } from "@/lib/media/jpeg";
+import { decodeCompressedImageToRgb, encodeCompressedImage } from "@/lib/media/jpeg";
 import { imageMetrics } from "@/lib/analysis/image";
 import { extractImagePayload } from "@/lib/engine/extract";
 import { createRunId, jsonOk, readUpload, runHandler } from "@/lib/api/http";
@@ -23,11 +23,7 @@ export async function POST(request: Request) {
       readField(form, "passphrase"),
       "passphrase",
     );
-    const quality = parseOrThrow(
-      jpegQualitySchema,
-      readField(form, "quality"),
-      "quality",
-    );
+    const format = parseOrThrow(imageCompressionFormatSchema, readField(form, "format"), "format");
 
     const stego = await decodePng(bytes);
 
@@ -41,9 +37,9 @@ export async function POST(request: Request) {
     let errorCode: string | null = null;
 
     try {
-      const jpegBytes = await encodeJpeg(bytes, quality);
-      outputBytes = jpegBytes.length;
-      const decoded = await decodeJpegToRgb(jpegBytes);
+      const compressedBytes = await encodeCompressedImage(bytes, format);
+      outputBytes = compressedBytes.length;
+      const decoded = await decodeCompressedImageToRgb(compressedBytes);
       metrics = imageMetrics(stego, decoded);
 
       try {
@@ -67,8 +63,8 @@ export async function POST(request: Request) {
     const result: TestResult = {
       runId: createRunId(),
       media: "image",
-      test: "jpeg",
-      parameter: quality,
+      test: format,
+      parameter: 80,
       inputBytes: bytes.length,
       outputBytes,
       metrics,

@@ -23,10 +23,15 @@ import {
   type MapSummary,
 } from "@/lib/api/client";
 import { buildXlsx, saveBlob, xlsxFilename, type ExportRow } from "@/lib/export/xlsx";
-import type { AudioAnalyzeResponse, FlacRoundTrip, Metrics, TestResult } from "@/lib/contracts/types";
+import type { AudioAnalyzeResponse, Metrics, TestKind, TestResult } from "@/lib/contracts/types";
 
-const JPEG_QUALITIES = [90, 70, 50];
-const FLAC_LEVELS = [0, 5, 8];
+const IMAGE_FORMATS = ["jpeg", "webp"] as const;
+const AUDIO_FORMATS = ["flac", "mp3"] as const;
+type ImageFormat = (typeof IMAGE_FORMATS)[number];
+type AudioFormat = (typeof AUDIO_FORMATS)[number];
+function resultParameter(format: ImageFormat | AudioFormat) {
+  return format === "jpeg" || format === "webp" ? 80 : format === "mp3" ? 128 : 5;
+}
 function artifactFile(artifact: MediaArtifact) {
   const binary = atob(artifact.base64);
   const bytes = new Uint8Array(binary.length);
@@ -36,7 +41,7 @@ function artifactFile(artifact: MediaArtifact) {
 
 function attackColumns(media: "image" | "audio"): TableColumn[] {
   return [
-    { key: "parameter", header: media === "image" ? "Quality" : "Level" },
+    { key: "parameter", header: "Format" },
     { key: "sizeRatio", header: "Size ratio" },
     { key: "mse", header: "MSE" },
     { key: "psnr", header: "PSNR" },
@@ -65,7 +70,7 @@ export function ForensicConsole() {
   const [restoredMetrics, setRestoredMetrics] = useState<Metrics | null>(null);
   const [restoredPcmIdentical, setRestoredPcmIdentical] = useState<boolean | null>(null);
   const [finalText, setFinalText] = useState<string | null>(null);
-  const [attackParameter, setAttackParameter] = useState(70);
+  const [attackFormat, setAttackFormat] = useState<ImageFormat | AudioFormat>("jpeg");
   const [sourcePreview, setSourcePreview] = useState("");
   const [compressedPreview, setCompressedPreview] = useState("");
   const [compressedPlaybackPreview, setCompressedPlaybackPreview] = useState("");
@@ -102,7 +107,7 @@ export function ForensicConsole() {
       const blob = await response.blob();
       const extension = clue.mediaType === "IMAGE" ? "png" : "wav";
       setAttackFile(new File([blob], `clue-${clue.nodeOrder + 1}.${extension}`, { type: clue.mediaType === "IMAGE" ? "image/png" : "audio/wav" }));
-      setAttackParameter(clue.mediaType === "IMAGE" ? 70 : 5);
+      setAttackFormat(clue.mediaType === "IMAGE" ? "jpeg" : "flac");
       setAttackPass(clue.passphrase);
       setBaselineText(null);
       setCompressedFile(null);
@@ -121,6 +126,8 @@ export function ForensicConsole() {
   const [pairResult, setPairResult] = useState<Awaited<ReturnType<typeof analyzeImage>> | null>(null);
   const [audioPairResult, setAudioPairResult] = useState<AudioAnalyzeResponse | null>(null);
   const [pairMedia, setPairMedia] = useState<"IMAGE" | "AUDIO">("IMAGE");
+  const [pairAttackFormat, setPairAttackFormat] = useState<ImageFormat | AudioFormat | "original">("original");
+  const [pairRunning, setPairRunning] = useState(false);
   const [audioCoverFile, setAudioCoverFile] = useState<File | null>(null);
   const [audioStegoFile, setAudioStegoFile] = useState<File | null>(null);
   const [audioCoverPreview, setAudioCoverPreview] = useState("");
@@ -224,11 +231,11 @@ export function ForensicConsole() {
     setAttackRows([]);
     try {
       if (isImageAttack) {
-        const result = await compressImageArtifact(attackFile, attackParameter);
+        const result = await compressImageArtifact(attackFile, attackFormat as ImageFormat);
         setCompressedFile(artifactFile(result.artifact));
         setCompressedPlaybackFile(null);
       } else {
-        const result = await compressAudioArtifact(attackFile, attackParameter);
+        const result = await compressAudioArtifact(attackFile, attackFormat as AudioFormat);
         setCompressedFile(artifactFile(result.artifact));
         setCompressedPlaybackFile(artifactFile(result.playback));
       }
@@ -276,8 +283,8 @@ export function ForensicConsole() {
       setAttackRows((previous) => [...previous, {
         runId: crypto.randomUUID(),
         media: isImageAttack ? "image" : "audio",
-        test: isImageAttack ? "jpeg" : "flac",
-        parameter: attackParameter,
+        test: attackFormat,
+        parameter: resultParameter(attackFormat),
         inputBytes: attackFile.size,
         outputBytes: compressedFile?.size ?? null,
         metrics: restoredMetrics,
@@ -290,8 +297,8 @@ export function ForensicConsole() {
       setFinalText(null);
       setAttackError(err instanceof Error ? `Restored file could not decrypt the message: ${err.message}` : "Restored file could not decrypt the message.");
       setAttackRows((previous) => [...previous, {
-        runId: crypto.randomUUID(), media: isImageAttack ? "image" : "audio", test: isImageAttack ? "jpeg" : "flac",
-        parameter: attackParameter, inputBytes: attackFile.size, outputBytes: compressedFile?.size ?? null,
+        runId: crypto.randomUUID(), media: isImageAttack ? "image" : "audio", test: attackFormat,
+        parameter: resultParameter(attackFormat), inputBytes: attackFile.size, outputBytes: compressedFile?.size ?? null,
         metrics: restoredMetrics, pcmIdentical: restoredPcmIdentical, extractionStatus: "FAIL",
         elapsedMs: Math.round(performance.now() - attackStartedAt.current), errorCode: "DECRYPT_FAILED",
       }]);
@@ -305,10 +312,19 @@ export function ForensicConsole() {
     setPairError(null);
     setPairResult(null);
     setAudioPairResult(null);
+    setPairRunning(true);
     try {
-      setPairResult(await analyzeImage(coverFile, stegoFile));
+      let comparedStego = stegoFile;
+      if (pairAttackFormat === "jpeg" || pairAttackFormat === "webp") {
+        const compressed = await compressImageArtifact(stegoFile, pairAttackFormat);
+        const restored = await restoreImageArtifact(artifactFile(compressed.artifact), stegoFile);
+        comparedStego = artifactFile(restored.artifact);
+      }
+      setPairResult(await analyzeImage(coverFile, comparedStego));
     } catch (err) {
       setPairError(err instanceof Error ? err.message : "Analysis failed.");
+    } finally {
+      setPairRunning(false);
     }
   };
 
@@ -317,10 +333,19 @@ export function ForensicConsole() {
     setPairError(null);
     setPairResult(null);
     setAudioPairResult(null);
+    setPairRunning(true);
     try {
-      setAudioPairResult(await analyzeAudio(audioCoverFile, audioStegoFile));
+      let comparedStego = audioStegoFile;
+      if (pairAttackFormat === "flac" || pairAttackFormat === "mp3") {
+        const compressed = await compressAudioArtifact(audioStegoFile, pairAttackFormat);
+        const restored = await restoreAudioArtifact(artifactFile(compressed.artifact), audioStegoFile);
+        comparedStego = artifactFile(restored.artifact);
+      }
+      setAudioPairResult(await analyzeAudio(audioCoverFile, comparedStego));
     } catch (err) {
       setPairError(err instanceof Error ? err.message : "Audio analysis failed.");
+    } finally {
+      setPairRunning(false);
     }
   };
 
@@ -367,17 +392,17 @@ export function ForensicConsole() {
           file = new File([blob], `${asset.filename}.${media === "image" ? "png" : "wav"}`, { type: media === "image" ? "image/png" : "audio/wav" });
         }
       } catch (error) {
-        rows.push({ filename: asset.filename, media, parameter: 0, result: null, status: "ERROR", error: error instanceof Error ? error.message : "Asset unavailable" });
+        rows.push({ filename: asset.filename, media, format: "unavailable", parameter: 0, result: null, status: "ERROR", error: error instanceof Error ? error.message : "Asset unavailable" });
         continue;
       }
-      for (const parameter of media === "image" ? JPEG_QUALITIES : FLAC_LEVELS) {
+      for (const parameter of media === "image" ? IMAGE_FORMATS : AUDIO_FORMATS) {
         try {
           const result = media === "image"
-            ? await compressImage(file, asset.passphrase, parameter)
-            : await compressAudio(file, asset.passphrase, parameter);
-          rows.push({ filename: file.name, media, parameter, result, status: result.extractionStatus === "PASS" ? "PASS" : result.extractionStatus === "FAIL" ? "FAIL" : "ERROR" });
+            ? await compressImage(file, asset.passphrase, parameter as ImageFormat)
+            : await compressAudio(file, asset.passphrase, parameter as AudioFormat);
+          rows.push({ filename: file.name, media, format: parameter, parameter: result.parameter ?? resultParameter(parameter), result, status: result.extractionStatus === "PASS" ? "PASS" : result.extractionStatus === "FAIL" ? "FAIL" : "ERROR" });
         } catch (error) {
-          rows.push({ filename: file.name, media, parameter, result: null, status: "ERROR", error: error instanceof Error ? error.message : "Attack failed" });
+          rows.push({ filename: file.name, media, format: parameter, parameter: resultParameter(parameter), result: null, status: "ERROR", error: error instanceof Error ? error.message : "Attack failed" });
         }
       }
     }
@@ -388,11 +413,11 @@ export function ForensicConsole() {
   const exportAttack = async () => {
     const blob = await buildXlsx({
       media: isImageAttack ? "image" : "audio",
-      test: isImageAttack ? "jpeg" : "flac",
+      test: attackFormat,
       buildVersion: "0.1.0",
       environment: "demo",
-      comparisonSource: isImageAttack ? "stego vs JPEG decoded" : "PCM before vs after FLAC",
-      parameters: { passphrase: null },
+      comparisonSource: `stego tested after ${attackFormat.toUpperCase()} compression and restoration`,
+      parameters: { format: attackFormat, setting: resultParameter(attackFormat), passphrase: null },
       rows: attackRows.map((row) => ({
         ...row,
         filename: attackFile?.name ?? null,
@@ -403,18 +428,19 @@ export function ForensicConsole() {
         mediaMeta: restoredMetrics ? `MSE ${restoredMetrics.mse.toFixed(6)} · PSNR ${restoredMetrics.psnrDb == null ? "INF" : restoredMetrics.psnrDb.toFixed(2)} dB` : null,
       })),
     });
-    saveBlob(blob, xlsxFilename(isImageAttack ? "image" : "audio", isImageAttack ? "jpeg" : "flac"));
+    saveBlob(blob, xlsxFilename(isImageAttack ? "image" : "audio", attackFormat));
   };
 
   const exportBatch = async () => {
-    const mediaTypes = [...new Set(batchRows.map((row) => row.media))];
-    for (const media of mediaTypes) {
-      const selectedRows = batchRows.filter((row) => row.media === media);
+    const formats = [...new Set(batchRows.map((row) => row.format).filter((format) => format !== "unavailable"))] as Array<ImageFormat | AudioFormat>;
+    for (const format of formats) {
+      const media = format === "jpeg" || format === "webp" ? "image" : "audio";
+      const selectedRows = batchRows.filter((row) => row.format === format);
       const rows: ExportRow[] = selectedRows.map((row) => ({
         ...(row.result ?? {
-          runId: `${row.filename}-error-${row.parameter}`,
+          runId: `${row.filename}-error-${row.format}`,
           media: row.media,
-          test: row.media === "image" ? "jpeg" : "flac",
+          test: row.format === "unavailable" ? (row.media === "image" ? "jpeg" : "flac") : row.format as TestKind,
           parameter: row.parameter,
           inputBytes: 0,
           outputBytes: null,
@@ -425,18 +451,18 @@ export function ForensicConsole() {
           errorCode: row.error ?? "AUDIT_ERROR",
         }),
         filename: row.filename,
-        compressedFilename: row.result ? `${row.filename}-${media === "image" ? `q${row.parameter}.jpg` : `level${row.parameter}.flac`}` : null,
+        compressedFilename: row.result ? `${row.filename.replace(/\.[^.]+$/, "")}.${row.format === "jpeg" ? "jpg" : row.format}` : null,
         compressedBytes: row.result?.outputBytes ?? null,
-        mediaMeta: row.result ? `Attack parameter ${row.parameter}; extraction ${row.status}; output ${row.result.outputBytes ?? "N/A"} bytes` : row.error ?? null,
+        mediaMeta: row.result ? `Format ${row.format.toUpperCase()} · setting ${row.parameter}; extraction ${row.status}; output ${row.result.outputBytes ?? "N/A"} bytes` : row.error ?? null,
       }));
-      const test = media === "image" ? "jpeg" : "flac";
+      const test = format;
       const blob = await buildXlsx({
         media,
         test,
         buildVersion: "0.1.0",
         environment: "demo",
-        comparisonSource: "palace clue media tested at every supported quality/level, followed by extraction",
-        parameters: { selectedAssetRuns: selectedRows.length, qualitiesOrLevels: (media === "image" ? JPEG_QUALITIES : FLAC_LEVELS).join("/") },
+        comparisonSource: "palace media tested with selected compression format, followed by extraction",
+        parameters: { selectedAssets: selectedRows.length, format, setting: resultParameter(format) },
         rows,
       });
       saveBlob(blob, xlsxFilename(media, test));
@@ -476,7 +502,7 @@ export function ForensicConsole() {
                 setRestoredPcmIdentical(null);
                 setFinalText(null);
                 setAttackError(null);
-                setAttackParameter(event.target.files?.[0]?.type === "image/png" ? 70 : 5);
+                setAttackFormat(event.target.files?.[0]?.type === "image/png" ? "jpeg" : "flac");
                 event.target.value = "";
               }}
             />
@@ -492,14 +518,14 @@ export function ForensicConsole() {
             <Button disabled={!attackFile || attackPass.length < 12 || attackRunning} onClick={checkBaseline}>{attackRunning ? "Checking…" : "Decrypt original"}</Button>
             {baselineText !== null ? <p className="mt-3 rounded-control border border-success/30 bg-success/5 p-3 text-[12px] text-success">Baseline: PASS · {baselineText}</p> : null}
           </StageStep>
-          <StageStep number="2" title={isImageAttack ? "Compress to JPEG" : "Compress to FLAC"}>
+          <StageStep number="2" title={`Compress to ${attackFormat.toUpperCase()}`}>
             <div className="flex flex-wrap items-center gap-3">
-              <label className="text-[12px] text-muted">{isImageAttack ? "JPEG quality" : "FLAC level"}
-                <select value={attackParameter} onChange={(event) => setAttackParameter(Number(event.target.value))} className="ml-2 rounded-control border border-line bg-canvas px-3 py-2 text-ink">
-                  {(isImageAttack ? JPEG_QUALITIES : FLAC_LEVELS).map((value) => <option key={value} value={value}>{value}</option>)}
+              <label className="text-[12px] text-muted">Compression format
+                <select value={attackFormat} onChange={(event) => { const format = event.target.value as ImageFormat | AudioFormat; setAttackFormat(format); setCompressedFile(null); setCompressedPlaybackFile(null); setRestoredFile(null); setRestoredMetrics(null); setRestoredPcmIdentical(null); setFinalText(null); setAttackRows([]); }} className="ml-2 rounded-control border border-line bg-canvas px-3 py-2 text-ink">
+                  {(isImageAttack ? IMAGE_FORMATS : AUDIO_FORMATS).map((format) => <option key={format} value={format}>{format.toUpperCase()}</option>)}
                 </select>
               </label>
-              <Button disabled={!attackFile || baselineText === null || attackRunning} onClick={compressSource}>{attackRunning ? "Compressing…" : `Compress ${isImageAttack ? "JPEG" : "FLAC"}`}</Button>
+              <Button disabled={!attackFile || baselineText === null || attackRunning} onClick={compressSource}>{attackRunning ? "Compressing…" : `Compress ${attackFormat.toUpperCase()}`}</Button>
             </div>
             {compressedFile ? <StagePreview title="Compressed output · original kept above" file={compressedFile} src={compressedPreview} playbackSrc={compressedPlaybackPreview || undefined} /> : null}
           </StageStep>
@@ -522,7 +548,7 @@ export function ForensicConsole() {
               rows={attackRows.map((r) => {
                 const ratio = r.outputBytes != null ? (r.outputBytes / r.inputBytes).toFixed(3) : "N/A";
                 return {
-                  parameter: r.parameter ?? "N/A",
+                  parameter: r.test.toUpperCase(),
                   sizeRatio: ratio,
                   mse: r.metrics ? r.metrics.mse.toFixed(6) : "N/A",
                   psnr: r.metrics ? (r.metrics.psnrDb == null ? "INF" : `${r.metrics.psnrDb.toFixed(2)} dB`) : "N/A",
@@ -543,8 +569,8 @@ export function ForensicConsole() {
       </Section>
 
       <Section title="Pair analysis" subtitle="Compare raw and stego image or audio assets, from a palace clue or local files.">
-        <div className="mb-3 grid gap-3 min-[900px]:grid-cols-3">
-          <select value={pairMedia} onChange={(event) => { setPairMedia(event.target.value as "IMAGE" | "AUDIO"); setPairCoverClue(""); setCoverFile(null); setStegoFile(null); setAudioCoverFile(null); setAudioStegoFile(null); setPairResult(null); setAudioPairResult(null); }} className="rounded-control border border-line bg-canvas px-3 py-2 text-[12px] text-ink"><option value="IMAGE">Image analysis</option><option value="AUDIO">Audio analysis</option></select>
+        <div className="mb-3 grid gap-3 min-[900px]:grid-cols-4">
+          <select value={pairMedia} onChange={(event) => { setPairMedia(event.target.value as "IMAGE" | "AUDIO"); setPairAttackFormat("original"); setPairCoverClue(""); setCoverFile(null); setStegoFile(null); setAudioCoverFile(null); setAudioStegoFile(null); setPairResult(null); setAudioPairResult(null); }} className="rounded-control border border-line bg-canvas px-3 py-2 text-[12px] text-ink"><option value="IMAGE">Image analysis</option><option value="AUDIO">Audio analysis</option></select>
               <select value={pairSourceMap} onChange={(event) => { const id = event.target.value; setPairSourceMap(id); setPairCoverClue(""); setPairClues([]); setCoverFile(null); setStegoFile(null); setAudioCoverFile(null); setAudioStegoFile(null); setPairResult(null); setAudioPairResult(null); if (id) void fetchMap(id).then((map) => setPairClues(map.clues)).catch((err) => setPairError(err instanceof Error ? err.message : "Could not load map assets.")); }} className="rounded-control border border-line bg-canvas px-3 py-2 text-[12px] text-ink">
             <option value="">Choose palace map…</option>
             {maps.map((map) => <option key={map.id} value={map.id}>{map.title}</option>)}
@@ -552,6 +578,10 @@ export function ForensicConsole() {
           <select disabled={!pairSourceMap} value={pairCoverClue} onChange={(event) => { setPairCoverClue(event.target.value); void choosePairAsset(event.target.value); }} className="rounded-control border border-line bg-canvas px-3 py-2 text-[12px] text-ink disabled:opacity-50">
             <option value="">Select one image clue (raw + stego paired)…</option>
             {pairClues.filter((clue) => clue.mediaType === pairMedia).map((clue, i) => <option key={clue.id} value={clue.id}>Clue {i + 1} · paired {pairMedia.toLowerCase()} files</option>)}
+          </select>
+          <select value={pairAttackFormat} onChange={(event) => setPairAttackFormat(event.target.value as ImageFormat | AudioFormat | "original")} className="rounded-control border border-line bg-canvas px-3 py-2 text-[12px] text-ink">
+            <option value="original">Compare original stego</option>
+            {(pairMedia === "IMAGE" ? IMAGE_FORMATS : AUDIO_FORMATS).map((format) => <option key={format} value={format}>After {format.toUpperCase()}</option>)}
           </select>
         </div>
         <p className="mb-3 text-center font-mono text-[10px] uppercase text-muted">Or upload a pair</p>
@@ -585,7 +615,7 @@ export function ForensicConsole() {
         </div> : null}
         {pairMedia === "AUDIO" && audioCoverFile && audioStegoFile ? <div className="mt-4 grid gap-4 rounded-card border border-line bg-canvas p-4 min-[900px]:grid-cols-2">{[[audioCoverFile, audioCoverPreview, "Raw cover audio"], [audioStegoFile, audioStegoPreview, "Stego audio"]].map(([file,src,label]) => <div key={label as string}><p className="mb-2 text-[11px] text-muted">{label as string} · {(file as File).name} · {formatBytes((file as File).size)}</p><audio controls preload="metadata" src={src as string} className="w-full" /></div>)}</div> : null}
         <div className="mt-3">
-          {pairMedia === "IMAGE" ? <Button disabled={!coverFile || !stegoFile} onClick={runPair}>Analyze image pair</Button> : <Button disabled={!audioCoverFile || !audioStegoFile} onClick={runAudioPair}>Analyze audio pair</Button>}
+          {pairMedia === "IMAGE" ? <Button disabled={!coverFile || !stegoFile || pairRunning} onClick={runPair}>{pairRunning ? "Analyzing…" : `Analyze image · ${pairAttackFormat.toUpperCase()}`}</Button> : <Button disabled={!audioCoverFile || !audioStegoFile || pairRunning} onClick={runAudioPair}>{pairRunning ? "Analyzing…" : `Analyze audio · ${pairAttackFormat.toUpperCase()}`}</Button>}
         </div>
         {pairError ? <div className="mt-3"><ErrorBanner message={pairError} /></div> : null}
         {pairMedia === "IMAGE" && pairResult ? (
@@ -599,7 +629,7 @@ export function ForensicConsole() {
               <MetricCard label="Identical" value={pairResult.metrics.identical ? "TRUE" : "FALSE"} />
             </div>
             <div className="flex items-center justify-between">
-              <h3 className="text-[15px] font-medium">Combined RGB intensity histogram</h3>
+              <h3 className="text-[15px] font-medium">Combined RGB histogram · raw cover vs {pairAttackFormat === "original" ? "original stego" : `${pairAttackFormat.toUpperCase()} restored stego`}</h3>
             </div>
             <HistogramChart cover={pairResult.histograms.cover} stego={pairResult.histograms.stego} />
             <div><h3 className="mb-2 text-[13px] font-medium">Enhanced LSB · grayscale channel planes</h3><div className="space-y-5">{([['r','Red'],['g','Green'],['b','Blue']] as const).map(([channel,label]) => <div key={channel}><h4 className="mb-2 text-[12px] text-muted">{label}</h4><div className="grid gap-4 min-[900px]:grid-cols-2"><div><p className="mb-1 text-[10px] text-muted">Cover</p><ImagePreview src={`data:image/png;base64,${pairResult.lsbChannels.cover[channel]}`} alt={`${label} cover LSB plane`} /></div><div><p className="mb-1 text-[10px] text-muted">Stego</p><ImagePreview src={`data:image/png;base64,${pairResult.lsbChannels.stego[channel]}`} alt={`${label} stego LSB plane`} /></div></div></div>)}</div></div>
@@ -614,13 +644,13 @@ export function ForensicConsole() {
             <MetricCard label="PSNR" value={audioPairResult.metrics.psnrDb == null ? "∞" : `${audioPairResult.metrics.psnrDb.toFixed(2)} dB`} />
             <MetricCard label="PCM identical" value={audioPairResult.metrics.identical ? "YES" : "NO"} />
           </div>
-          <div><h3 className="mb-2 text-[13px] font-medium">Audio comparison over time</h3><AudioComparisonChart cover={audioPairResult.waveform.cover} stego={audioPairResult.waveform.stego} changedRate={audioPairResult.waveform.changedRate} /></div>
+          <div><h3 className="mb-2 text-[13px] font-medium">Audio comparison over time · raw cover vs {pairAttackFormat === "original" ? "original stego" : `${pairAttackFormat.toUpperCase()} restored stego`}</h3><AudioComparisonChart cover={audioPairResult.waveform.cover} stego={audioPairResult.waveform.stego} changedRate={audioPairResult.waveform.changedRate} /></div>
           <p className="text-[11px] text-muted">PCM samples are 16-bit values. For LSB steganography, MSE can be near zero and PSNR very high because only a small fraction of samples change by one least significant bit; changed-sample rate and mean delta show that more directly.</p>
         </div> : null}
         {pairFullscreen && coverFile && stegoFile ? <div role="dialog" aria-modal="true" aria-label="Full size image comparison" className="fixed inset-0 z-[70] grid place-items-center bg-black/95 p-6" onClick={() => setPairFullscreen(false)}><button type="button" className="absolute right-5 top-5 rounded-control border border-white/30 px-4 py-2 text-white">Close ✕</button><div className="grid w-full grid-cols-2 gap-4">{[[pairCoverPreview, "Original cover"], [pairStegoPreview, "Embedded image"]].map(([src, label]) => <div key={label}><p className="mb-2 text-center text-white">{label}</p><ImagePreview src={src} alt={label} className="h-[82vh] w-full bg-transparent object-contain" /></div>)}</div></div> : null}
       </Section>
 
-      <Section title="Palace asset audit" subtitle="Test every JPEG quality (90/70/50) or FLAC level (0/5/8) for each selected asset. Passphrases are entered for this run only.">
+      <Section title="Palace asset audit" subtitle="Test each selected asset once with JPEG and WebP (images) or FLAC and MP3 (audio).">
         <div className="mb-3 flex flex-wrap gap-2">
           <Button variant={auditSource === "map" ? "primary" : "secondary"} onClick={() => setAuditSource("map")}>Choose palace</Button>
           <Button variant={auditSource === "upload" ? "primary" : "secondary"} onClick={() => setAuditSource("upload")}>Upload custom assets</Button>
@@ -642,7 +672,7 @@ export function ForensicConsole() {
         </div>
         <div className="mt-3 flex gap-3">
           <Button disabled={batchAssetIds.length === 0 || batchRunning || batchAssetIds.some((id) => (batchPassphrases[id] ?? (auditSource === "map" ? auditClues.find((clue) => clue.id === id)?.passphrase : "") ?? "").length < 12)} onClick={runBatch}>
-            {batchRunning ? "Testing all qualities and levels…" : "Run Full Asset Audit"}
+            {batchRunning ? "Testing compression formats…" : "Run Full Asset Audit"}
           </Button>
           <Button variant="secondary" disabled={batchRows.length === 0} onClick={exportBatch}>
             Export Forensic XLSX Report(s)
@@ -663,7 +693,7 @@ export function ForensicConsole() {
               rows={batchRows.map((row) => ({
                 filename: row.filename,
                 media: row.media.toUpperCase(),
-                attack: row.media === "image" ? `JPEG · Q${row.parameter}` : `FLAC · level ${row.parameter}`,
+                attack: row.format.toUpperCase(),
                 mse: row.result?.metrics ? row.result.metrics.mse.toFixed(6) : row.error ?? "N/A",
                 psnr: row.result?.metrics ? (row.result.metrics.psnrDb == null ? "INF" : `${row.result.metrics.psnrDb.toFixed(2)} dB`) : "N/A",
                 pcm: row.media === "audio" && row.result ? (row.result.pcmIdentical ? "YES" : "NO") : "N/A",
@@ -698,8 +728,9 @@ function Section({
 interface BatchAssetRow {
   filename: string;
   media: "image" | "audio";
+  format: ImageFormat | AudioFormat | "unavailable";
   parameter: number;
-  result: TestResult | FlacRoundTrip | null;
+  result: TestResult | null;
   status: "PASS" | "FAIL" | "ERROR";
   error?: string;
 }
