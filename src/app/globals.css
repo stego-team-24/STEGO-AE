@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+.passphrase-masked {
+  -webkit-text-security: disc;
+}
+
 @theme {
   --color-canvas: #0b0e13;
   --color-surface: #141922;

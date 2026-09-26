@@ -143,6 +143,7 @@ export function ForensicConsole() {
   const [batchAssetIds, setBatchAssetIds] = useState<string[]>([]);
   const [batchPassphrases, setBatchPassphrases] = useState<Record<string, string>>({});
   const [batchRows, setBatchRows] = useState<BatchAssetRow[]>([]);
+  const [batchComparisonRows, setBatchComparisonRows] = useState<ExportRow[]>([]);
   const [batchRunning, setBatchRunning] = useState(false);
   const [auditMapId, setAuditMapId] = useState("");
   const [auditClues, setAuditClues] = useState<Awaited<ReturnType<typeof fetchMap>>["clues"]>([]);
@@ -379,27 +380,83 @@ export function ForensicConsole() {
     if (selected.length === 0 || selected.some((asset) => asset.passphrase.length < 12)) return;
     setBatchRunning(true);
     setBatchRows([]);
+    setBatchComparisonRows([]);
     const rows: BatchAssetRow[] = [];
+    const comparisons: ExportRow[] = [];
+    const addComparison = (args: {
+      media: "image" | "audio";
+      test: TestKind;
+      parameter: number | null;
+      left: File;
+      right: File;
+      metrics: Metrics | null;
+      status: TestResult["extractionStatus"];
+      comparison: string;
+      pcmIdentical?: boolean | null;
+    }) => comparisons.push({
+      runId: `${args.left.name}-${args.test}-${args.right.name}`,
+      media: args.media,
+      test: args.test,
+      parameter: args.parameter,
+      inputBytes: args.left.size,
+      outputBytes: args.right.size,
+      metrics: args.metrics,
+      pcmIdentical: args.pcmIdentical ?? null,
+      extractionStatus: args.status,
+      elapsedMs: 0,
+      errorCode: null,
+      comparison: args.comparison,
+      filename: args.left.name,
+      referenceFilename: args.right.name,
+      mediaMeta: args.test === "baseline" ? "Uncompressed baseline" : `${args.test.toUpperCase()} restored output · extraction ${args.status}`,
+    });
     for (const asset of selected) {
       const media = asset.media;
       let file: File;
+      let coverFile: File | null = null;
       try {
         if (asset.file) file = asset.file;
         else {
-          const response = await fetch(asset.clue!.mediaUrl);
-          if (!response.ok) throw new Error("Asset unavailable");
-          const blob = await response.blob();
-          file = new File([blob], `${asset.filename}.${media === "image" ? "png" : "wav"}`, { type: media === "image" ? "image/png" : "audio/wav" });
+          const [stegoResponse, coverResponse] = await Promise.all([fetch(asset.clue!.mediaUrl), fetch(asset.clue!.coverMediaUrl)]);
+          if (!stegoResponse.ok || !coverResponse.ok) throw new Error("Asset unavailable");
+          const [stegoBlob, coverBlob] = await Promise.all([stegoResponse.blob(), coverResponse.blob()]);
+          const extension = media === "image" ? "png" : "wav";
+          const mime = media === "image" ? "image/png" : "audio/wav";
+          file = new File([stegoBlob], `${asset.filename}-stego.${extension}`, { type: mime });
+          coverFile = new File([coverBlob], `${asset.filename}-raw.${extension}`, { type: mime });
         }
       } catch (error) {
         rows.push({ filename: asset.filename, media, format: "unavailable", parameter: 0, result: null, status: "ERROR", error: error instanceof Error ? error.message : "Asset unavailable" });
         continue;
+      }
+      if (coverFile) {
+        try {
+          const baseline = media === "image" ? await analyzeImage(coverFile, file) : await analyzeAudio(coverFile, file);
+          addComparison({ media, test: "baseline", parameter: null, left: coverFile, right: file, metrics: baseline.metrics, status: "NOT_RUN", comparison: "Raw cover vs original stego" });
+        } catch {
+          // Keep the compression rows even if a raw-pair metric cannot be computed.
+        }
       }
       for (const parameter of media === "image" ? IMAGE_FORMATS : AUDIO_FORMATS) {
         try {
           const result = media === "image"
             ? await compressImage(file, asset.passphrase, parameter as ImageFormat)
             : await compressAudio(file, asset.passphrase, parameter as AudioFormat);
+          const compressed = media === "image"
+            ? await compressImageArtifact(file, parameter as ImageFormat)
+            : await compressAudioArtifact(file, parameter as AudioFormat);
+          const compressedFile = artifactFile(compressed.artifact);
+          const restored = media === "image"
+            ? await restoreImageArtifact(compressedFile, file)
+            : await restoreAudioArtifact(compressedFile, file);
+          const restoredFile = artifactFile(restored.artifact);
+          addComparison({ media, test: parameter, parameter: result.parameter ?? resultParameter(parameter), left: file, right: restoredFile, metrics: result.metrics, status: result.extractionStatus, comparison: `Original stego vs ${parameter.toUpperCase()}-restored stego`, pcmIdentical: result.pcmIdentical });
+          if (coverFile) {
+            const rawComparison = media === "image"
+              ? await analyzeImage(coverFile, restoredFile)
+              : await analyzeAudio(coverFile, restoredFile);
+            addComparison({ media, test: parameter, parameter: result.parameter ?? resultParameter(parameter), left: coverFile, right: restoredFile, metrics: rawComparison.metrics, status: result.extractionStatus, comparison: `Raw cover vs ${parameter.toUpperCase()}-restored stego`, pcmIdentical: result.pcmIdentical });
+          }
           rows.push({ filename: file.name, media, format: parameter, parameter: result.parameter ?? resultParameter(parameter), result, status: result.extractionStatus === "PASS" ? "PASS" : result.extractionStatus === "FAIL" ? "FAIL" : "ERROR" });
         } catch (error) {
           rows.push({ filename: file.name, media, format: parameter, parameter: resultParameter(parameter), result: null, status: "ERROR", error: error instanceof Error ? error.message : "Attack failed" });
@@ -407,6 +464,7 @@ export function ForensicConsole() {
       }
     }
     setBatchRows(rows);
+    setBatchComparisonRows(comparisons);
     setBatchRunning(false);
   };
 
@@ -432,42 +490,59 @@ export function ForensicConsole() {
   };
 
   const exportBatch = async () => {
-    const formats = [...new Set(batchRows.map((row) => row.format).filter((format) => format !== "unavailable"))] as Array<ImageFormat | AudioFormat>;
-    for (const format of formats) {
-      const media = format === "jpeg" || format === "webp" ? "image" : "audio";
-      const selectedRows = batchRows.filter((row) => row.format === format);
-      const rows: ExportRow[] = selectedRows.map((row) => ({
-        ...(row.result ?? {
-          runId: `${row.filename}-error-${row.format}`,
-          media: row.media,
-          test: row.format === "unavailable" ? (row.media === "image" ? "jpeg" : "flac") : row.format as TestKind,
-          parameter: row.parameter,
-          inputBytes: 0,
-          outputBytes: null,
-          metrics: null,
-          pcmIdentical: null,
-          extractionStatus: "ERROR",
-          elapsedMs: 0,
-          errorCode: row.error ?? "AUDIT_ERROR",
-        }),
-        filename: row.filename,
-        compressedFilename: row.result ? `${row.filename.replace(/\.[^.]+$/, "")}.${row.format === "jpeg" ? "jpg" : row.format}` : null,
-        compressedBytes: row.result?.outputBytes ?? null,
-        mediaMeta: row.result ? `Format ${row.format.toUpperCase()} · setting ${row.parameter}; extraction ${row.status}; output ${row.result.outputBytes ?? "N/A"} bytes` : row.error ?? null,
-      }));
-      const test = format;
-      const blob = await buildXlsx({
-        media,
-        test,
-        buildVersion: "0.1.0",
-        environment: "demo",
-        comparisonSource: "palace media tested with selected compression format, followed by extraction",
-        parameters: { selectedAssets: selectedRows.length, format, setting: resultParameter(format) },
-        rows,
-      });
-      saveBlob(blob, xlsxFilename(media, test));
-    }
+    const errorRows: ExportRow[] = batchRows.filter((row) => !row.result).map((row) => ({
+      ...(row.result ?? {
+        runId: `${row.filename}-error-${row.format}`,
+        media: row.media,
+        test: row.media === "image" ? "jpeg" : "flac",
+        parameter: row.parameter,
+        inputBytes: 0,
+        outputBytes: null,
+        metrics: null,
+        pcmIdentical: null,
+        extractionStatus: "ERROR",
+        elapsedMs: 0,
+        errorCode: row.error ?? "AUDIT_ERROR",
+      }),
+      filename: row.filename,
+      compressedFilename: row.result ? `${row.filename.replace(/\.[^.]+$/, "")}.${row.format === "jpeg" ? "jpg" : row.format}` : null,
+      compressedBytes: row.result?.outputBytes ?? null,
+      mediaMeta: row.result ? `Format ${row.format.toUpperCase()} · setting ${row.parameter}; extraction ${row.status}; output ${row.result.outputBytes ?? "N/A"} bytes` : row.error ?? null,
+    }));
+    const formats = [...new Set(batchRows.map((row) => row.format))];
+    const rows = [...batchComparisonRows, ...errorRows];
+    const blob = await buildXlsx({
+      media: "mixed",
+      test: "mixed",
+      buildVersion: "0.1.0",
+      environment: "demo",
+      comparisonSource: "all selected palace media tested with their supported compression formats, followed by extraction",
+      parameters: { auditedAssets: new Set(batchRows.map((row) => row.filename)).size, resultRows: rows.length, formats: formats.join(", ") },
+      rows,
+    });
+    saveBlob(blob, xlsxFilename("mixed", "mixed"));
   };
+
+  const auditComparisonRows: ExportRow[] = [
+    ...batchComparisonRows,
+    ...batchRows.filter((row) => !row.result).map((row) => ({
+      runId: `${row.filename}-error-${row.format}`,
+      media: row.media,
+      test: row.media === "image" ? "jpeg" as const : "flac" as const,
+      parameter: row.parameter,
+      inputBytes: 0,
+      outputBytes: null,
+      metrics: null,
+      pcmIdentical: null,
+      extractionStatus: "ERROR" as const,
+      elapsedMs: 0,
+      errorCode: row.error ?? "AUDIT_ERROR",
+      comparison: `${row.format.toUpperCase()} compression failed`,
+      filename: row.filename,
+      referenceFilename: null,
+      mediaMeta: row.error ?? "Compression failed",
+    })),
+  ];
 
   return (
     <div className="space-y-8">
@@ -650,7 +725,7 @@ export function ForensicConsole() {
         {pairFullscreen && coverFile && stegoFile ? <div role="dialog" aria-modal="true" aria-label="Full size image comparison" className="fixed inset-0 z-[70] grid place-items-center bg-black/95 p-6" onClick={() => setPairFullscreen(false)}><button type="button" className="absolute right-5 top-5 rounded-control border border-white/30 px-4 py-2 text-white">Close ✕</button><div className="grid w-full grid-cols-2 gap-4">{[[pairCoverPreview, "Original cover"], [pairStegoPreview, "Embedded image"]].map(([src, label]) => <div key={label}><p className="mb-2 text-center text-white">{label}</p><ImagePreview src={src} alt={label} className="h-[82vh] w-full bg-transparent object-contain" /></div>)}</div></div> : null}
       </Section>
 
-      <Section title="Palace asset audit" subtitle="Test each selected asset once with JPEG and WebP (images) or FLAC and MP3 (audio).">
+      <Section title="Palace asset audit" subtitle="Compare the original cover and stego against each other and against every JPEG/WebP or FLAC/MP3 restored result.">
         <div className="mb-3 flex flex-wrap gap-2">
           <Button variant={auditSource === "map" ? "primary" : "secondary"} onClick={() => setAuditSource("map")}>Choose palace</Button>
           <Button variant={auditSource === "upload" ? "primary" : "secondary"} onClick={() => setAuditSource("upload")}>Upload custom assets</Button>
@@ -675,29 +750,33 @@ export function ForensicConsole() {
             {batchRunning ? "Testing compression formats…" : "Run Full Asset Audit"}
           </Button>
           <Button variant="secondary" disabled={batchRows.length === 0} onClick={exportBatch}>
-            Export Forensic XLSX Report(s)
+            Export Combined Forensic XLSX Report
           </Button>
         </div>
         {batchRows.length > 0 ? (
           <div className="mt-3">
             <ResultTable
               columns={[
-                { key: "filename", header: "Map asset" },
-                { key: "media", header: "Format" },
-                { key: "attack", header: "Attack" },
+                { key: "comparison", header: "Comparison" },
+                { key: "filename", header: "File A" },
+                { key: "reference", header: "File B" },
+                { key: "media", header: "Media" },
+                { key: "codec", header: "Codec" },
                 { key: "mse", header: "MSE" },
                 { key: "psnr", header: "PSNR" },
                 { key: "pcm", header: "PCM identical" },
-                { key: "status", header: "Status" },
+                { key: "status", header: "Extraction" },
               ]}
-              rows={batchRows.map((row) => ({
+              rows={auditComparisonRows.map((row) => ({
+                comparison: row.comparison,
                 filename: row.filename,
+                reference: row.referenceFilename,
                 media: row.media.toUpperCase(),
-                attack: row.format.toUpperCase(),
-                mse: row.result?.metrics ? row.result.metrics.mse.toFixed(6) : row.error ?? "N/A",
-                psnr: row.result?.metrics ? (row.result.metrics.psnrDb == null ? "INF" : `${row.result.metrics.psnrDb.toFixed(2)} dB`) : "N/A",
-                pcm: row.media === "audio" && row.result ? (row.result.pcmIdentical ? "YES" : "NO") : "N/A",
-                status: row.status,
+                codec: row.test === "baseline" ? "ORIGINAL" : row.test.toUpperCase(),
+                mse: row.metrics ? row.metrics.mse.toFixed(6) : row.mediaMeta ?? "N/A",
+                psnr: row.metrics ? (row.metrics.psnrDb == null ? "INF" : `${row.metrics.psnrDb.toFixed(2)} dB`) : "N/A",
+                pcm: row.media === "audio" && row.pcmIdentical !== null ? (row.pcmIdentical ? "YES" : "NO") : "N/A",
+                status: row.extractionStatus === "NOT_RUN" ? "BASELINE" : row.extractionStatus,
               }))}
             />
           </div>

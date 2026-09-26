@@ -26,16 +26,36 @@ interface Pos {
   y: number;
 }
 
-function stepToward(enemy: Pos, target: Pos, walls: Set<string>, gridSize: number): Pos {
-  const dx = Math.sign(target.x - enemy.x);
-  const dy = Math.sign(target.y - enemy.y);
-  if (dx !== 0 && enemy.x + dx >= 0 && enemy.x + dx < gridSize && !walls.has(`${enemy.x + dx},${enemy.y}`)) {
-    return { x: enemy.x + dx, y: enemy.y };
+function stepToward(enemy: Pos, target: Pos, walls: Set<string>, gridSize: number, otherShadows: Pos[] = []): Pos {
+  const key = (point: Pos) => `${point.x},${point.y}`;
+  const startKey = key(enemy);
+  const targetKey = key(target);
+  const blocked = new Set(otherShadows.map(key));
+  const queue = [enemy];
+  const previous = new Map<string, string | null>([[startKey, null]]);
+  const directions = [{ x: 1, y: 0 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 0, y: -1 }];
+
+  for (let cursor = 0; cursor < queue.length && !previous.has(targetKey); cursor += 1) {
+    const current = queue[cursor];
+    for (const direction of directions) {
+      const next = { x: current.x + direction.x, y: current.y + direction.y };
+      const nextKey = key(next);
+      if (next.x < 0 || next.y < 0 || next.x >= gridSize || next.y >= gridSize || walls.has(nextKey) || blocked.has(nextKey) || previous.has(nextKey)) continue;
+      previous.set(nextKey, key(current));
+      queue.push(next);
+    }
   }
-  if (dy !== 0 && enemy.y + dy >= 0 && enemy.y + dy < gridSize && !walls.has(`${enemy.x},${enemy.y + dy}`)) {
-    return { x: enemy.x, y: enemy.y + dy };
+
+  if (!previous.has(targetKey)) return enemy;
+  let stepKey = targetKey;
+  let parent = previous.get(stepKey);
+  while (parent !== null && parent !== undefined && parent !== startKey) {
+    stepKey = parent;
+    parent = previous.get(stepKey);
   }
-  return enemy;
+  if (parent !== startKey) return enemy;
+  const [x, y] = stepKey.split(",").map(Number);
+  return { x, y };
 }
 
 export function Infiltration({ mapId }: { mapId: string }) {
@@ -110,7 +130,13 @@ export function Infiltration({ mapId }: { mapId: string }) {
       const state = stateRef.current;
       if (!state.victory && !state.failed) setElapsed((prev) => prev + 1);
       if (state.alarm && !state.victory && !state.failed) {
-        const moved = state.enemies.map((enemy) => stepToward(enemy, state.player, walls, map?.gridSize ?? 15));
+        const moved = state.enemies.map((enemy, index) => stepToward(
+          enemy,
+          state.player,
+          walls,
+          map?.gridSize ?? 15,
+          state.enemies.filter((_, otherIndex) => otherIndex !== index),
+        ));
         const caught = moved.some(
           (enemy) => enemy.x === state.player.x && enemy.y === state.player.y,
         );
@@ -215,8 +241,13 @@ export function Infiltration({ mapId }: { mapId: string }) {
       setPlayer({ x, y });
       setVisited((prev) => new Set([...prev, ...visionTiles(x, y, map.gridSize)]));
 
+      if (!alarm && x === map.entranceX && y === map.entranceY) {
+        setEntryBriefingOpen(true);
+        return;
+      }
+
       const clueIndex = clues.findIndex((clue) => clue.coordX === x && clue.coordY === y);
-      if (clueIndex >= 0 && !alarm) {
+      if (clueIndex >= 0 && clueIndex <= solved.length && !alarm) {
         if (solved.includes(clueIndex)) reviewSolvedClue(clueIndex);
         else openClueModal(clueIndex);
         return;
@@ -408,6 +439,7 @@ export function Infiltration({ mapId }: { mapId: string }) {
                 map={map}
                 clues={clues}
                 solved={solved}
+                unlockedClueCount={solved.length + 1}
                 enemies={enemies}
                 alarm={alarm}
                 navigatorOn={navigatorOn}
@@ -436,14 +468,16 @@ export function Infiltration({ mapId }: { mapId: string }) {
           <section className="rounded-card border border-line bg-surface p-4">
             <p className="text-[10px] uppercase tracking-[1px] text-muted">Clues</p>
             <ol className="mt-2 space-y-1.5">
-              {clues.map((item, index) => (
-                <li key={item.id}>
-                  <button type="button" onClick={() => solved.includes(index) ? reviewSolvedClue(index) : moveTo(item.coordX, item.coordY)} className={`flex w-full items-center justify-between rounded-control border px-2.5 py-2 text-left font-mono text-[10px] ${solved.includes(index) ? "border-success/40 text-success" : index === nextClueIndex ? "border-accent/40 text-accent" : "border-line text-muted"}`}>
-                    <span>CLUE {index + 1} · {columnLabel(item.coordX)}{item.coordY + 1}</span>
-                    <span>{solved.includes(index) ? "✓ REVIEW" : ""}</span>
-                  </button>
-                </li>
-              ))}
+              {clues.map((item, index) => {
+                const complete = solved.includes(index);
+                const unlocked = index <= solved.length;
+                return (
+                  <li key={item.id} className={`flex items-center justify-between rounded-control border px-2.5 py-2 font-mono text-[10px] ${complete ? "border-success/40 text-success" : unlocked ? "border-accent/40 text-accent" : "border-line text-muted opacity-70"}`}>
+                      <span>CLUE {index + 1}</span>
+                      <span>{complete ? "✓ SOLVED · REVIEW" : unlocked ? "● ACTIVE" : "○ LOCKED"}</span>
+                  </li>
+                );
+              })}
             </ol>
           </section>
           <section className="rounded-card border border-line bg-surface p-4">
@@ -508,6 +542,7 @@ function GameRow({
   map,
   clues,
   solved,
+  unlockedClueCount,
   enemies,
   alarm,
   navigatorOn,
@@ -523,6 +558,7 @@ function GameRow({
   map: MapDetail;
   clues: MapDetail["clues"];
   solved: number[];
+  unlockedClueCount: number;
   enemies: Pos[];
   alarm: boolean;
   navigatorOn: boolean;
@@ -552,7 +588,7 @@ function GameRow({
         else if (isEnemy && (alarm || isVisible)) { content = "●"; cell = "border-error bg-error/20 text-error"; }
         else if (isTreasure && solved.length === clues.length && (isVisible || alarm)) { content = "◇"; cell = "border-accent bg-accent/40 text-accent"; }
         else if (isEntrance && (isVisible || alarm)) { content = "▶"; cell = "border-success/50 bg-success/10 text-success"; }
-        else if (clueIndex >= 0 && (isVisible || alarm)) {
+        else if (clueIndex >= 0 && clueIndex < unlockedClueCount && (isVisible || alarm)) {
           content = solved.includes(clueIndex) ? "✓" : String(clueIndex + 1);
           cell = solved.includes(clueIndex) ? "border-success/40 bg-success/10 text-success" : "border-sky-400/50 bg-sky-400/15 text-sky-300";
         } else if (isVisible) cell = "bg-[#19192b] border-line";
@@ -597,6 +633,9 @@ function ClueModal({
 }) {
   const [imageExpanded, setImageExpanded] = useState(false);
   const [showPassphrase, setShowPassphrase] = useState(false);
+  useEffect(() => {
+    if (text !== null) document.getElementById("clue-continue")?.focus();
+  }, [text]);
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4">
       <div role="dialog" aria-modal="true" aria-labelledby="clue-title" className="w-full max-w-lg rounded-card border border-line bg-surface p-6">
@@ -623,18 +662,18 @@ function ClueModal({
             <label htmlFor="clue-pass" className="text-[13px] text-muted">Passphrase</label>
             <p className="mt-2 text-[12px] text-muted">Enter the passphrase used to protect this clue’s message.</p>
             <div className="mt-2 flex gap-2">
-              <input id={`clue-pass-${clue.id}`} name={`clue-passphrase-${clue.id}`} type={showPassphrase ? "text" : "password"} value={passphrase} onChange={(event) => setPassphrase(event.target.value)} autoComplete="new-password" autoCapitalize="none" spellCheck={false} autoFocus className="min-w-0 flex-1 rounded-control border border-line bg-canvas px-4 py-3 text-ink" />
+              <input id={`clue-pass-${clue.id}`} type="text" value={passphrase} onChange={(event) => setPassphrase(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); if (passphrase.length > 0 && !extracting) onSubmit(); } }} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoFocus className={`min-w-0 flex-1 rounded-control border border-line bg-canvas px-4 py-3 text-ink ${showPassphrase ? "" : "passphrase-masked"}`} />
               <button type="button" onClick={() => setShowPassphrase((value) => !value)} className="rounded-control border border-line px-3 text-[12px] text-muted">{showPassphrase ? "Hide" : "Show"}</button>
             </div>
             {error ? <div className="mt-3"><ErrorBanner message={error} /></div> : null}
             <p className="mt-2 text-[12px] text-muted">Attempts: {wrongAttempts}/5 {revealed ? "— hint revealed, you can keep trying" : ""}</p>
-            <div className="mt-4"><Button disabled={passphrase.length === 0 || extracting} onClick={onSubmit}>{extracting ? "Extracting…" : "Extract message"}</Button></div>
+            <div className="mt-4"><Button type="button" disabled={passphrase.length === 0 || extracting} onClick={onSubmit}>{extracting ? "Extracting…" : "Extract message"}</Button></div>
           </>
         ) : (
           <>
             <label className="text-[13px] text-muted">Recovered message</label>
             <textarea readOnly value={text} rows={4} className="mt-2 w-full rounded-control border border-line bg-canvas px-4 py-3 font-mono text-ink" />
-            <div className="mt-4"><Button onClick={onClose}>{review ? "Close clue" : "Continue"}</Button></div>
+            <div className="mt-4"><Button id="clue-continue" onClick={onClose}>{review ? "Close clue" : "Continue"}</Button></div>
           </>
         )}
       </div>

@@ -116,32 +116,6 @@ function openMaze(id: string, size: number) {
   return floor;
 }
 
-function reachablePath(floor: Set<string>, start: GridPoint, finish: GridPoint): GridPoint[] {
-  const queue = [start];
-  const previous = new Map<string, string | null>([[key(start), null]]);
-  const dirs = [[1, 0], [0, 1], [-1, 0], [0, -1]] as const;
-  for (let cursor = 0; cursor < queue.length; cursor += 1) {
-    const point = queue[cursor];
-    if (key(point) === key(finish)) break;
-    for (const [dx, dy] of dirs) {
-      const next = { x: point.x + dx, y: point.y + dy };
-      const nextKey = key(next);
-      if (floor.has(nextKey) && !previous.has(nextKey)) {
-        previous.set(nextKey, key(point));
-        queue.push(next);
-      }
-    }
-  }
-  const path: GridPoint[] = [];
-  let cursor: string | null = key(finish);
-  while (cursor !== null) {
-    const [x, y] = cursor.split(",").map(Number);
-    path.push({ x, y });
-    cursor = previous.get(cursor) ?? null;
-  }
-  return path.reverse();
-}
-
 function clueCount(size: number) {
   if (size <= 10) return 3;
   if (size <= 15) return 4;
@@ -167,14 +141,30 @@ export function getTemplate(id: string, size = 15): LabyrinthTemplate {
       treasure = point;
     }
   }
-  const path = reachablePath(floor, entrance, treasure);
   const count = clueCount(size);
   const passphrases = Array.from({ length: count }, (_, index) =>
     `${selected.id.split("-").map((part) => part.slice(0, 2)).join("").toUpperCase()}-${size}-KEY-${String(index + 1).padStart(2, "0")}`,
   );
+  const placementRandom = seeded(hash(`${selected.id}:clues:${size}`));
+  const clueCandidates = cells.filter((point) => key(point) !== key(entrance) && key(point) !== key(treasure));
+  for (let index = clueCandidates.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(placementRandom() * (index + 1));
+    [clueCandidates[index], clueCandidates[swapIndex]] = [clueCandidates[swapIndex], clueCandidates[index]];
+  }
+  const selectedCluePoints: GridPoint[] = [];
+  for (const point of clueCandidates) {
+    if (selectedCluePoints.every((placed) => Math.abs(point.x - placed.x) + Math.abs(point.y - placed.y) >= Math.max(2, Math.floor(size / 6)))) {
+      selectedCluePoints.push(point);
+      if (selectedCluePoints.length === count) break;
+    }
+  }
+  for (const point of clueCandidates) {
+    if (selectedCluePoints.length >= count) break;
+    if (!selectedCluePoints.some((placed) => key(placed) === key(point))) selectedCluePoints.push(point);
+  }
   const clues: TemplateClue[] = Array.from({ length: count }, (_, index) => {
-    const point = path[Math.min(path.length - 2, Math.floor(((index + 1) * (path.length - 1)) / (count + 1)))];
-    const next = path[Math.min(path.length - 1, Math.floor(((index + 2) * (path.length - 1)) / (count + 1)))];
+    const point = selectedCluePoints[index];
+    const next = selectedCluePoints[index + 1] ?? treasure;
     const nextPassword = passphrases[index + 1];
     const message = nextPassword
       ? `Navigate to column ${columnLabel(next.x)} row ${next.y + 1}. The next clue password is: ${nextPassword}.`

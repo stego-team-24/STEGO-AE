@@ -11,6 +11,8 @@ import type { Media, TestKind, TestResult } from "@/lib/contracts/types";
 
 export interface ExportRow extends TestResult {
   filename?: string | null;
+  referenceFilename?: string | null;
+  comparison?: string | null;
   mediaMeta?: string | null;
   messageBytes?: number | null;
   compressedFilename?: string | null;
@@ -20,8 +22,8 @@ export interface ExportRow extends TestResult {
 }
 
 export interface XlsxOptions {
-  media: Media;
-  test: TestKind;
+  media: Media | "mixed";
+  test: TestKind | "mixed";
   buildVersion: string;
   environment: string;
   comparisonSource: string;
@@ -87,7 +89,9 @@ export async function buildXlsx(options: XlsxOptions): Promise<Blob> {
   results.columns = [
     { header: "run_id", key: "runId", width: 38 },
     { header: "media", key: "media", width: 10 },
+    { header: "comparison", key: "comparison", width: 42 },
     { header: "filename", key: "filename", width: 28 },
+    { header: "reference_file", key: "referenceFilename", width: 30 },
     { header: "compressed_file", key: "compressedFilename", width: 30 },
     { header: "compressed_bytes", key: "compressedBytes", width: 18 },
     { header: "restored_file", key: "restoredFilename", width: 30 },
@@ -111,7 +115,9 @@ export async function buildXlsx(options: XlsxOptions): Promise<Blob> {
     results.addRow({
       runId: safeText(row.runId),
       media: row.media,
+      comparison: safeText(row.comparison),
       filename: safeText(row.filename),
+      referenceFilename: safeText(row.referenceFilename),
       compressedFilename: safeText(row.compressedFilename),
       compressedBytes: numericCell(row.compressedBytes),
       restoredFilename: safeText(row.restoredFilename),
@@ -141,6 +147,8 @@ export async function buildXlsx(options: XlsxOptions): Promise<Blob> {
     ["run_id", "Unique identifier for one experiment row."],
     ["media", "image or audio."],
     ["filename", "Source media filename (a literal string, never a formula)."],
+    ["comparison", "Pair label: Raw cover vs original stego; Raw cover vs codec-restored stego; or Original stego vs codec-restored stego."],
+    ["reference_file", "Second media filename compared with filename."],
     ["compressed_file", "Intermediate compressed artifact produced by the selected attack."],
     ["compressed_bytes", "Compressed artifact size in bytes."],
     ["restored_file", "Restored PNG or WAV artifact used for the final extraction."],
@@ -185,7 +193,7 @@ function timestampToken(date: Date): string {
   );
 }
 
-export function xlsxFilename(media: Media, test: TestKind, date = new Date()): string {
+export function xlsxFilename(media: Media | "mixed", test: TestKind | "mixed", date = new Date()): string {
   return `stego-ae_${media}_${test}_${timestampToken(date)}.xlsx`;
 }
 
