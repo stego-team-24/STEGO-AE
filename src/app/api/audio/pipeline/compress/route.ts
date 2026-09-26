@@ -21,9 +21,10 @@ export async function POST(request: Request) {
     const playbackBytes = encodeWav({ ...wav, samples: decodedSamples });
     const extension = format === "flac" ? "flac" : "mp3";
     const mime = format === "flac" ? "audio/flac" : "audio/mpeg";
+    const stem = (file.name.replace(/\.[^.]+$/, "") || "asset").replace(/[^a-zA-Z0-9._-]+/g, "-");
     return jsonOk({
-      artifact: { name: file.name.split(".").slice(0, -1).join(".") + `.${extension}`, mime, size: artifactBytes.length, base64: toBase64(artifactBytes) },
-      playback: { name: `${file.name.split(".").slice(0, -1).join(".")}-decoded-preview.wav`, mime: "audio/wav", size: playbackBytes.length, base64: toBase64(playbackBytes) },
+      artifact: { name: `${format}-${stem}.${extension}`, mime, size: artifactBytes.length, base64: toBase64(artifactBytes) },
+      playback: { name: `${stem}-after-${format}.wav`, mime: "audio/wav", size: playbackBytes.length, base64: toBase64(playbackBytes) },
       parameter: format === "flac" ? 5 : MP3_BITRATE_KBPS,
       format,
     });

@@ -5,11 +5,11 @@ export function ImagePreview({ src, alt = "Preview", className }: { src: string;
     <img
       src={src}
       alt={alt}
-      className={className ?? "max-h-72 w-full rounded-control border border-line bg-canvas object-contain"}
+      className={`${className ?? "max-h-72 w-full rounded-control border border-line bg-canvas object-contain"} p5-media-enter`}
     />
   );
 }
 
 export function AudioPreview({ src }: { src: string }) {
-  return <audio controls src={src} className="w-full" />;
+  return <audio controls src={src} className="p5-audio-enter w-full" />;
 }

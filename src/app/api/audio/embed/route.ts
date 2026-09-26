@@ -33,7 +33,7 @@ export async function POST(request: Request) {
       artifact: {
         base64: toBase64(stegoBytes),
         mime: WAV_MIME,
-        filename: "stego.wav",
+        filename: "stego-ori.wav",
       },
       metrics,
       metadata: {

@@ -254,6 +254,13 @@ export async function fetchMap(id: string): Promise<MapDetail> {
   return (await response.json()) as MapDetail;
 }
 
+export async function fetchMapForensicPassphrases(id: string): Promise<Record<string, string>> {
+  const response = await fetch(`/api/maps/${id}/forensic-passphrases`);
+  if (!response.ok) throw new ApiClientError("Could not load saved asset passphrases.", null, null, response.status);
+  const data = (await response.json()) as { passphrases: Record<string, string> };
+  return data.passphrases;
+}
+
 export async function extractClue(id: string, passphrase: string): Promise<ExtractResponse> {
   const response = await fetch(`/api/clues/${id}/extract`, {
     method: "POST",

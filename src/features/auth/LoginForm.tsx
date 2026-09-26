@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { P5Panel } from "@/components/p5/P5Panel";
 import { P5Button } from "@/components/p5/P5Button";
 import { P5Tag } from "@/components/p5/P5Tag";
+import { navigateWithTransition } from "@/lib/navigation";
 
 export function LoginForm() {
-  const router = useRouter();
   const search = useSearchParams();
   const [register, setRegister] = useState(false);
   const [name, setName] = useState("");
@@ -38,8 +38,7 @@ export function LoginForm() {
       if (!response.ok) throw new Error(data.error?.message ?? "Unable to authenticate.");
       if (!data.user?.id) throw new Error("The server did not confirm your account sign-in. Check the server logs.");
       const next = search.get("next");
-      router.replace(next?.startsWith("/") && !next.startsWith("//") ? next : "/maps");
-      router.refresh();
+      navigateWithTransition(next?.startsWith("/") && !next.startsWith("//") ? next : "/maps", { replace: true, refresh: true });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to authenticate.");
     } finally { setBusy(false); }

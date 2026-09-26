@@ -29,7 +29,7 @@ export async function POST(request: Request) {
       artifact: {
         base64: toBase64(stegoBytes),
         mime: PNG_MIME,
-        filename: "stego.png",
+        filename: "stego-ori.png",
       },
       metrics,
       metadata: {

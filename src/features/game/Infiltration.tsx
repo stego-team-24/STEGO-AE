@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { Button } from "@/components/forms/Button";
 import { ErrorBanner } from "@/components/feedback/ErrorBanner";
@@ -84,6 +85,9 @@ export function Infiltration({ mapId }: { mapId: string }) {
   const [extracting, setExtracting] = useState(false);
   const [totalWrong, setTotalWrong] = useState(0);
   const [entryBriefingOpen, setEntryBriefingOpen] = useState(false);
+  const [entryBriefingVisible, setEntryBriefingVisible] = useState(false);
+  const [entryBriefingClosing, setEntryBriefingClosing] = useState(false);
+  const [palaceReveal, setPalaceReveal] = useState(false);
   const [savedRank, setSavedRank] = useState<string | null>(null);
   const [savedScore, setSavedScore] = useState<number | null>(null);
   const [resultError, setResultError] = useState<string | null>(null);
@@ -92,6 +96,7 @@ export function Infiltration({ mapId }: { mapId: string }) {
   const [movementNotice, setMovementNotice] = useState("");
   const [shadowHitAnimating, setShadowHitAnimating] = useState(false);
   const lastShadowHitRef = useRef(0);
+  const playerTileRef = useRef<HTMLButtonElement | null>(null);
 
   const walls = useMemo(
     () => map
@@ -106,13 +111,33 @@ export function Infiltration({ mapId }: { mapId: string }) {
   const clues = useMemo(() => map?.clues ?? [], [map]);
   const nextClueIndex = clues.findIndex((_, index) => !solved.includes(index));
 
-  const stateRef = useRef({ player, alarm, victory, failed, enemies, hp });
+  const stateRef = useRef({ player, alarm, victory, failed, enemies, hp, entryBriefingOpen });
   useEffect(() => {
-    stateRef.current = { player, alarm, victory, failed, enemies, hp };
+    stateRef.current = { player, alarm, victory, failed, enemies, hp, entryBriefingOpen };
   });
 
   useEffect(() => {
+    if (!map || entryBriefingOpen || palaceReveal || modalClue !== null || victory || failed) return;
+    const frame = window.requestAnimationFrame(() => {
+      const tile = playerTileRef.current;
+      if (!tile) return;
+      const headerBottom = document.querySelector<HTMLElement>(".game-header")?.getBoundingClientRect().bottom ?? 0;
+      const visibleCenter = headerBottom + (window.innerHeight - headerBottom) / 2;
+      const tileCenter = tile.getBoundingClientRect().top + tile.getBoundingClientRect().height / 2;
+      const offset = tileCenter - visibleCenter;
+      if (Math.abs(offset) > 12) {
+        window.scrollBy({
+          top: offset,
+          behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+        });
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [player.x, player.y, map, entryBriefingOpen, palaceReveal, modalClue, victory, failed]);
+
+  useEffect(() => {
     let cancelled = false;
+    let briefingTimer: number | undefined;
     fetchMap(mapId)
       .then((loaded) => {
         if (cancelled) return;
@@ -124,12 +149,19 @@ export function Infiltration({ mapId }: { mapId: string }) {
         setVisited(new Set(visionTiles(loaded.entranceX, loaded.entranceY, loaded.gridSize)));
         setEnemies(loaded.shadows.map((shadow) => ({ x: shadow.x, y: shadow.y })));
         setEntryBriefingOpen(true);
+        setPalaceReveal(true);
+        briefingTimer = window.setTimeout(() => {
+          if (cancelled) return;
+          setPalaceReveal(false);
+          setEntryBriefingVisible(true);
+        }, 1280);
       })
       .catch((err) => {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : "Failed to load map.");
       });
     return () => {
       cancelled = true;
+      if (briefingTimer !== undefined) window.clearTimeout(briefingTimer);
     };
   }, [mapId]);
 
@@ -151,7 +183,7 @@ export function Infiltration({ mapId }: { mapId: string }) {
   useEffect(() => {
     const interval = setInterval(() => {
       const state = stateRef.current;
-      if (!state.victory && !state.failed) setElapsed((prev) => prev + 1);
+      if (!state.victory && !state.failed && !state.entryBriefingOpen) setElapsed((prev) => prev + 1);
       if (state.alarm && !state.victory && !state.failed) {
         const moved = state.enemies.map((enemy, index) => stepToward(
           enemy,
@@ -266,6 +298,7 @@ export function Infiltration({ mapId }: { mapId: string }) {
 
       if (!alarm && x === map.entranceX && y === map.entranceY) {
         setEntryBriefingOpen(true);
+        setEntryBriefingVisible(true);
         return;
       }
 
@@ -366,7 +399,7 @@ export function Infiltration({ mapId }: { mapId: string }) {
   if (victory) {
     const avgPsnr = clues.reduce((sum, clue) => sum + (clue.psnrDb ?? 0), 0) / Math.max(1, clues.length);
     return (
-      <div className="mx-auto max-w-xl rounded-card border border-success/40 bg-success/10 p-8 text-center">
+      <div className="p5-result-enter mx-auto max-w-xl rounded-card border border-success/40 bg-success/10 p-8 text-center">
         <h1 className="text-[32px] font-bold text-success">Infiltration complete.</h1>
         <p className="mt-2 text-muted">You escaped the palace with the treasure.</p>
         <div className="mt-6 grid gap-3 min-[900px]:grid-cols-3">
@@ -399,7 +432,7 @@ export function Infiltration({ mapId }: { mapId: string }) {
 
   if (failed) {
     return (
-      <div className="mx-auto max-w-xl rounded-card border border-error/40 bg-error/10 p-8 text-center">
+      <div className="p5-result-enter mx-auto max-w-xl rounded-card border border-error/40 bg-error/10 p-8 text-center">
         <h1 className="text-[32px] font-bold text-error">Mission failed.</h1>
         <p className="mt-2 text-muted">You were caught too many times.</p>
         <Link
@@ -413,10 +446,10 @@ export function Infiltration({ mapId }: { mapId: string }) {
   }
 
   return (
-    <div className={`space-y-0 rounded-card ${alarm ? "bg-[#35151e]" : "bg-canvas"}`}>
+    <div className={`p5-game-scene space-y-0 rounded-card ${alarm ? "bg-[#35151e]" : "bg-canvas"} ${palaceReveal ? "p5-infiltration-reveal" : ""}`}>
       {alarm ? <div className="border-b border-error/30 bg-error/15 px-4 py-3 font-mono text-[11px] uppercase tracking-[1px] text-error">⚠ Treasure chase active — escape to entrance before guards converge!</div> : null}
       {shadowHitAnimating ? <div className="pointer-events-none fixed inset-0 z-[60] animate-pulse bg-red-600/35" aria-hidden="true" /> : null}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-surface px-4 py-3">
+      <div className="p5-game-status flex flex-wrap items-center justify-between gap-3 border-b border-line bg-surface px-4 py-3">
         <div>
           <h1 className="text-heading">{map.title}</h1>
           <p className="text-[13px] text-muted">
@@ -445,9 +478,9 @@ export function Infiltration({ mapId }: { mapId: string }) {
         </div>
       </div>
 
-      <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_220px]">
-        <div className="overflow-x-auto rounded-card border border-line bg-[#0b0b18] p-4">
-          <div tabIndex={0} aria-label="Labyrinth grid. Use arrow keys or WASD to move one tile." className="grid gap-[2px] outline-none focus-visible:ring-2 focus-visible:ring-accent" style={{ gridTemplateColumns: `24px repeat(${map.gridSize}, minmax(0, 1fr))`, minWidth: `${24 + map.gridSize * 24}px` }}>
+      <div className="p5-palace-layout grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_220px]">
+        <div className="p5-maze-frame overflow-x-auto rounded-card border border-line bg-[#0b0b18] p-4">
+          <div tabIndex={0} aria-label="Labyrinth grid. Use arrow keys or WASD to move one tile." className="p5-maze-grid grid gap-[2px] outline-none focus-visible:ring-2 focus-visible:ring-accent" style={{ gridTemplateColumns: `24px repeat(${map.gridSize}, minmax(0, 1fr))`, minWidth: `${24 + map.gridSize * 24}px` }}>
             <div />
             {Array.from({ length: map.gridSize }, (_, x) => (
               <div key={x} className="text-center font-mono text-[9px] text-muted">{columnLabel(x)}</div>
@@ -468,8 +501,10 @@ export function Infiltration({ mapId }: { mapId: string }) {
                 enemies={enemies}
                 alarm={alarm}
                 navigatorOn={navigatorOn}
+                reveal={palaceReveal}
                 targetTile={targetTile}
                 onMove={moveTo}
+                playerTileRef={playerTileRef}
               />
             ))}
           </div>
@@ -509,16 +544,32 @@ export function Infiltration({ mapId }: { mapId: string }) {
             <p className="text-[10px] uppercase tracking-[1px] text-muted">Objective</p>
             <p className="mt-2 font-mono text-[11px] text-ink">{alarm ? "Treasure found. Escape to the entrance." : "Solve clues, find the treasure."}</p>
           </section>
+          <section className="rounded-card border border-line bg-surface p-4" aria-label="Tile type legend">
+            <p className="mb-3 text-[10px] uppercase tracking-[1px] text-muted">Tile types</p>
+            <div className="game-legend">
+              {[
+                ["◆", "You"], ["▶", "Entrance"], ["◇", "Treasure"], ["?", "Clue node"],
+                ["●", "Shadow"], ["■", "Wall"], ["·", "Floor"],
+              ].map(([glyph, label]) => <div key={label} className="game-legend-item"><span className="game-legend-glyph" aria-hidden="true">{glyph}</span>{label}</div>)}
+            </div>
+          </section>
         </aside>
       </div>
 
-      {entryBriefingOpen ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4">
-          <section role="dialog" aria-modal="true" aria-labelledby="entry-briefing-title" className="w-full max-w-lg rounded-card border border-accent/40 bg-surface p-6 shadow-2xl">
+      {entryBriefingVisible ? (
+        <div className={`p5-overlay-enter fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 ${entryBriefingClosing ? "p5-briefing-exit" : ""}`}>
+          <section role="dialog" aria-modal="true" aria-labelledby="entry-briefing-title" className={`p5-dialog-enter p5-scan w-full max-w-lg rounded-card border border-accent/40 bg-surface p-6 shadow-2xl ${entryBriefingClosing ? "p5-briefing-exiting" : ""}`}>
             <p className="font-mono text-[10px] uppercase tracking-[1.5px] text-accent">Entrance briefing</p>
             <h2 id="entry-briefing-title" className="mt-2 text-heading">Your first lead</h2>
             <p className="mt-3 whitespace-pre-wrap rounded-control border border-line bg-canvas p-4 font-mono text-[13px] text-ink">{map.entryBriefing}</p>
-            <Button className="mt-4 w-full justify-center" onClick={() => setEntryBriefingOpen(false)}>Begin infiltration</Button>
+            <Button className="mt-4 w-full justify-center" disabled={entryBriefingClosing} onClick={() => {
+              setEntryBriefingClosing(true);
+              window.setTimeout(() => {
+                setEntryBriefingVisible(false);
+                setEntryBriefingOpen(false);
+                setEntryBriefingClosing(false);
+              }, 240);
+            }}>Begin infiltration</Button>
           </section>
         </div>
       ) : null}
@@ -571,8 +622,10 @@ function GameRow({
   enemies,
   alarm,
   navigatorOn,
+  reveal,
   targetTile,
   onMove,
+  playerTileRef,
 }: {
   y: number;
   gridSize: number;
@@ -587,8 +640,10 @@ function GameRow({
   enemies: Pos[];
   alarm: boolean;
   navigatorOn: boolean;
+  reveal: boolean;
   targetTile: Pos;
   onMove: (x: number, y: number) => void;
+  playerTileRef: RefObject<HTMLButtonElement | null>;
 }) {
   return (
     <>
@@ -604,6 +659,15 @@ function GameRow({
         const isTreasure = map.treasureX === x && map.treasureY === y;
         const isEnemy = enemies.some((e) => e.x === x && e.y === y);
         const isNavigated = navigatorOn && targetTile.x === x && targetTile.y === y;
+        const canIdentifyTile = isVisible || isVisited || alarm;
+        const tileType = !canIdentifyTile ? "Unexplored tile"
+          : isPlayer ? "Your position"
+            : isWall ? "Wall"
+              : isEnemy && (alarm || isVisible) ? "Shadow"
+                : isTreasure && solved.length === clues.length && (isVisible || alarm) ? "Treasure"
+                  : isEntrance ? "Entrance"
+                    : clueIndex >= 0 && clueIndex < unlockedClueCount ? `Clue ${clueIndex + 1}`
+                      : "Floor";
 
         let content: string | null = null;
         let cell = "bg-[#171729] border-line/50";
@@ -620,7 +684,7 @@ function GameRow({
         else if (isVisited) cell = "bg-[#171729]/50 border-line/30";
         else cell = "bg-[#050509] border-[#050509]";
         return (
-          <button key={x} type="button" onClick={() => onMove(x, y)} aria-label={`Tile ${columnLabel(x)}${y + 1}`} className={`grid aspect-square h-auto w-full min-w-0 place-items-center border font-mono text-[10px] ${cell}${isNavigated ? " ring-2 ring-accent" : ""}`}>
+          <button ref={isPlayer ? playerTileRef : undefined} key={x} type="button" onClick={() => onMove(x, y)} aria-label={`${tileType}, tile ${columnLabel(x)}${y + 1}`} title={`${tileType} · ${columnLabel(x)}${y + 1}`} style={reveal ? { animationDelay: `${Math.min((x + y) * 12, 260)}ms` } : undefined} className={`p5-game-tile grid aspect-square h-auto w-full min-w-0 place-items-center border font-mono text-[10px] ${cell}${isPlayer ? " p5-player-arrival" : isNavigated ? " p5-navigator-target ring-2 ring-accent" : ""}${reveal ? " p5-heist-cell" : ""}`}>
             {content}
           </button>
         );
@@ -662,8 +726,9 @@ function ClueModal({
     if (text !== null) document.getElementById("clue-continue")?.focus();
   }, [text]);
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4">
-      <div role="dialog" aria-modal="true" aria-labelledby="clue-title" className="w-full max-w-lg rounded-card border border-line bg-surface p-6">
+    <>
+    <div className="p5-overlay-enter fixed inset-0 z-50 grid place-items-center bg-black/75 p-4">
+      <div role="dialog" aria-modal="true" aria-labelledby="clue-title" className="p5-dialog-enter p5-scan w-full max-w-lg rounded-card border border-line bg-surface p-6">
         <div className="mb-4 flex items-center justify-between">
           <h2 id="clue-title" className="text-heading">Clue {index + 1}{review ? " · Recovered message" : ""}</h2>
           <button type="button" onClick={onClose} className="text-[13px] text-muted hover:text-ink">Close ✕</button>
@@ -676,12 +741,6 @@ function ClueModal({
             </button>
           ) : <AudioPreview src={clue.mediaUrl} />}
         </div>
-        {imageExpanded ? (
-          <div role="dialog" aria-modal="true" aria-label={`Clue ${index + 1} image`} className="fixed inset-0 z-[70] grid place-items-center bg-black/90 p-6" onClick={() => setImageExpanded(false)}>
-            <button type="button" onClick={() => setImageExpanded(false)} className="absolute right-5 top-5 rounded-control border border-white/30 px-4 py-2 text-sm text-white">Close ✕</button>
-            <ImagePreview src={clue.mediaUrl} alt={`Clue ${index + 1} enlarged`} className="max-h-[90vh] max-w-[94vw] rounded-none border-0 bg-transparent object-contain" />
-          </div>
-        ) : null}
         {text === null ? (
           <>
             <label htmlFor="clue-pass" className="text-[13px] text-muted">Passphrase</label>
@@ -703,5 +762,11 @@ function ClueModal({
         )}
       </div>
     </div>
+    {imageExpanded && typeof document !== "undefined" ? createPortal(
+      <div role="dialog" aria-modal="true" aria-label={`Clue ${index + 1} image`} className="p5-overlay-enter fixed inset-0 z-[100] grid place-items-center bg-black/95 p-3 sm:p-6" onClick={() => setImageExpanded(false)}>
+        <button type="button" onClick={() => setImageExpanded(false)} className="absolute right-4 top-4 z-10 rounded-control border border-white/30 bg-black/70 px-4 py-2 text-sm text-white sm:right-6 sm:top-6">Close ✕</button>
+        <ImagePreview src={clue.mediaUrl} alt={`Clue ${index + 1} enlarged`} className="p5-zoom-enter max-h-[94vh] max-w-[96vw] rounded-none border-0 bg-transparent object-contain" />
+      </div>, document.body) : null}
+    </>
   );
 }

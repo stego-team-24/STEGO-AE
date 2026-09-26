@@ -12,6 +12,9 @@
 
 # testing
 /coverage
+/playwright-report/
+/test-results/
+/blob-report/
 
 # next.js
 /.next/
@@ -23,6 +26,9 @@
 # misc
 .DS_Store
 *.pem
+.eslintcache
+/.turbo/
+/dist/
 
 # debug
 *.log

@@ -32,7 +32,7 @@ export function MapCatalog({ maps }: { maps: LobbyMap[] }) {
       {shown.map((map, index) => {
         const percent = map.clueCount ? Math.round(map.solved / map.clueCount * 100) : 0;
         const cleared = map.bestRank !== null;
-        return <P5Panel key={map.id} className="palace-card p5-pop-in" style={{ animationDelay: `${index * 55}ms` }}>
+        return <P5Panel key={map.id} className="palace-card p5-pop-in" style={{ animationDelay: `${220 + index * 65}ms` }}>
           <div className={`palace-status-band ${cleared ? "is-cleared" : ""}`} />
           <div className="palace-card-body">
             <div className="card-topline"><div className="card-tags"><P5Tag>{difficulty(map.gridSize)}</P5Tag>{map.mediaTypes.map((media) => <P5Tag key={media} className={media === "AUDIO" ? "tag-audio" : "tag-image"}>{media === "IMAGE" ? "PNG IMAGE" : "WAV AUDIO"}</P5Tag>)}</div><span className="card-map-number">PALACE {String(index + 1).padStart(2, "0")}</span></div>
@@ -40,7 +40,7 @@ export function MapCatalog({ maps }: { maps: LobbyMap[] }) {
             <p className="palace-description">{map.clueCount} encrypted {map.clueCount === 1 ? "clue" : "clues"} across a {map.gridSize} × {map.gridSize} labyrinth. Recover every clue, claim the treasure, and escape.</p>
             <div className="palace-facts"><span>{map.gridSize} × {map.gridSize} GRID</span><span>{map.clueCount} CLUE NODES</span></div>
             <div className="progress-label"><span>CLUES RECOVERED</span><span>{map.solved}/{map.clueCount}</span></div><div className="progress-track"><i style={{ width: `${percent}%` }} /></div>
-            <div className="card-foot"><span>{cleared ? `✓ CLEARED · BEST ${map.bestRank} · ${map.bestScore} PTS` : "○ NOT YET CLEARED"}</span><Link href={`/play/${map.id}`} className="card-action">{cleared ? "REPLAY →" : "INFILTRATE →"}</Link></div>
+            <div className="card-foot"><span>{cleared ? `✓ CLEARED · BEST ${map.bestRank} · ${map.bestScore} PTS` : "○ NOT YET CLEARED"}</span><Link href={`/play/${map.id}`} className="card-action p5-palace-entry">{cleared ? "REPLAY →" : "INFILTRATE →"}</Link></div>
           </div>
         </P5Panel>;
       })}

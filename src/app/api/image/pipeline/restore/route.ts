@@ -17,8 +17,10 @@ export async function POST(request: Request) {
     const decoded = await decodeCompressedImageToRgb(new Uint8Array(await compressed.arrayBuffer()));
     const restored = await encodePng(decoded);
     const original = await decodePng(new Uint8Array(await source.arrayBuffer()));
+    const format = compressed.type === "image/jpeg" || compressed.name.toLowerCase().endsWith(".jpeg") || compressed.name.toLowerCase().endsWith(".jpg") ? "jpeg" : "webp";
+    const sourceStem = source.name.replace(/\.[^.]+$/, "").replace(/-ori$/, "");
     return jsonOk({
-      artifact: { name: compressed.name.split(".").slice(0, -1).join(".") + "-restored.png", mime: "image/png", size: restored.length, base64: toBase64(restored) },
+      artifact: { name: `${sourceStem}-after-${format}.png`, mime: "image/png", size: restored.length, base64: toBase64(restored) },
       metrics: imageMetrics(original, decoded),
     });
   });

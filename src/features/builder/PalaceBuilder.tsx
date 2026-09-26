@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/forms/Button";
 import { ErrorBanner } from "@/components/feedback/ErrorBanner";
 import { publishMap, type ClueInput } from "@/lib/api/client";
 import { inspectAudio, inspectImage } from "@/lib/api/client";
+import { navigateWithTransition } from "@/lib/navigation";
 import type { PngInfo, WavInfo } from "@/lib/contracts/types";
 import { AudioPreview, ImagePreview } from "@/components/media/MediaPreview";
 import {
@@ -46,7 +46,6 @@ function fromTemplate(id: string, size: number) {
 }
 
 export function PalaceBuilder() {
-  const router = useRouter();
   const firstTemplate = getTemplate(TEMPLATES[0].id, 15);
   const [title, setTitle] = useState("");
   const [authorName, setAuthorName] = useState("");
@@ -225,7 +224,7 @@ export function PalaceBuilder() {
         shadows,
         clues: clueInputs,
       });
-      router.push("/maps");
+      navigateWithTransition("/maps");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Publish failed.");
     } finally {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Button } from "@/components/forms/Button";
 import { ErrorBanner } from "@/components/feedback/ErrorBanner";
 import { MetricCard } from "@/components/analysis/MetricCard";
@@ -17,6 +18,7 @@ import {
   extractAudio,
   extractImage,
   fetchMap,
+  fetchMapForensicPassphrases,
   restoreAudioArtifact,
   restoreImageArtifact,
   type MediaArtifact,
@@ -38,6 +40,13 @@ function artifactFile(artifact: MediaArtifact) {
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
   return new File([bytes], artifact.name, { type: artifact.mime });
 }
+function pairPreparationKey(media: "IMAGE" | "AUDIO", comparison: string, format: string, cover: File, stego: File) {
+  const stamp = (file: File) => `${file.name}:${file.size}:${file.lastModified}`;
+  return `${media}:${comparison}:${format}:${stamp(cover)}:${stamp(stego)}`;
+}
+function filePreviewKey(file: File) {
+  return `${file.name}:${file.size}:${file.lastModified}`;
+}
 
 function attackColumns(media: "image" | "audio"): TableColumn[] {
   return [
@@ -55,6 +64,8 @@ export function ForensicConsole() {
   const [maps, setMaps] = useState<MapSummary[]>([]);
   const [assetMapId, setAssetMapId] = useState("");
   const [assetClues, setAssetClues] = useState<Awaited<ReturnType<typeof fetchMap>>["clues"]>([]);
+  const [assetPassphrases, setAssetPassphrases] = useState<Record<string, string>>({});
+  const [selectedAssetClueId, setSelectedAssetClueId] = useState("");
   const [pairClues, setPairClues] = useState<Awaited<ReturnType<typeof fetchMap>>["clues"]>([]);
   const [assetLoading, setAssetLoading] = useState(false);
   const [attackFile, setAttackFile] = useState<File | null>(null);
@@ -84,11 +95,15 @@ export function ForensicConsole() {
   const loadMapAssets = async (mapId: string) => {
     setAssetMapId(mapId);
     setAssetClues([]);
+    setAssetPassphrases({});
+    setSelectedAssetClueId("");
+    setAttackPass("");
     if (!mapId) return;
     setAssetLoading(true);
     try {
-      const detail = await fetchMap(mapId);
+      const [detail, passphrases] = await Promise.all([fetchMap(mapId), fetchMapForensicPassphrases(mapId)]);
       setAssetClues(detail.clues);
+      setAssetPassphrases(passphrases);
     } catch (err) {
       setAttackError(err instanceof Error ? err.message : "Could not load map assets.");
     } finally {
@@ -97,6 +112,7 @@ export function ForensicConsole() {
   };
 
   const selectMapAsset = async (clueId: string) => {
+    setSelectedAssetClueId(clueId);
     const clue = assetClues.find((item) => item.id === clueId);
     if (!clue) return;
     setAttackError(null);
@@ -106,9 +122,9 @@ export function ForensicConsole() {
       if (!response.ok) throw new Error("Could not download this map asset.");
       const blob = await response.blob();
       const extension = clue.mediaType === "IMAGE" ? "png" : "wav";
-      setAttackFile(new File([blob], `clue-${clue.nodeOrder + 1}.${extension}`, { type: clue.mediaType === "IMAGE" ? "image/png" : "audio/wav" }));
+      setAttackFile(new File([blob], `stego-clue-${clue.nodeOrder + 1}.${extension}`, { type: clue.mediaType === "IMAGE" ? "image/png" : "audio/wav" }));
       setAttackFormat(clue.mediaType === "IMAGE" ? "jpeg" : "flac");
-      setAttackPass(clue.passphrase ?? "");
+      setAttackPass(assetPassphrases[clueId] ?? clue.passphrase ?? "");
       setBaselineText(null);
       setCompressedFile(null);
       setRestoredFile(null);
@@ -126,7 +142,11 @@ export function ForensicConsole() {
   const [pairResult, setPairResult] = useState<Awaited<ReturnType<typeof analyzeImage>> | null>(null);
   const [audioPairResult, setAudioPairResult] = useState<AudioAnalyzeResponse | null>(null);
   const [pairMedia, setPairMedia] = useState<"IMAGE" | "AUDIO">("IMAGE");
-  const [pairAttackFormat, setPairAttackFormat] = useState<ImageFormat | AudioFormat | "original">("original");
+  const [pairAttackFormat, setPairAttackFormat] = useState<ImageFormat | AudioFormat>("jpeg");
+  const [pairComparison, setPairComparison] = useState<"cover-stego" | "cover-compressed" | "stego-compressed">("cover-stego");
+  const [pairDisplay, setPairDisplay] = useState<{ left: { src: string; label: string; name: string }; right: { src: string; label: string; name: string } } | null>(null);
+  const [pairPrepared, setPairPrepared] = useState<{ key: string; file: File; src: string } | null>(null);
+  const [pairPreviewLoading, setPairPreviewLoading] = useState(false);
   const [pairRunning, setPairRunning] = useState(false);
   const [audioCoverFile, setAudioCoverFile] = useState<File | null>(null);
   const [audioStegoFile, setAudioStegoFile] = useState<File | null>(null);
@@ -138,6 +158,10 @@ export function ForensicConsole() {
   const [pairCoverClue, setPairCoverClue] = useState("");
   const [pairCoverPreview, setPairCoverPreview] = useState("");
   const [pairStegoPreview, setPairStegoPreview] = useState("");
+  const [pairCoverPreviewKey, setPairCoverPreviewKey] = useState("");
+  const [pairStegoPreviewKey, setPairStegoPreviewKey] = useState("");
+  const [audioCoverPreviewKey, setAudioCoverPreviewKey] = useState("");
+  const [audioStegoPreviewKey, setAudioStegoPreviewKey] = useState("");
 
   // Batch state
   const [batchAssetIds, setBatchAssetIds] = useState<string[]>([]);
@@ -152,6 +176,8 @@ export function ForensicConsole() {
   const [auditShowPass, setAuditShowPass] = useState<Record<string, boolean>>({});
 
   const isImageAttack = attackFile?.type === "image/png";
+  const pairLeftLabel = pairComparison === "stego-compressed" ? "Original stego" : "Raw cover";
+  const pairRightLabel = pairComparison === "cover-stego" ? "Original stego" : `Stego restored after ${pairAttackFormat.toUpperCase()}`;
 
   useEffect(() => {
     if (!attackFile) return;
@@ -160,29 +186,93 @@ export function ForensicConsole() {
     return () => { window.clearTimeout(timer); URL.revokeObjectURL(url); };
   }, [attackFile]);
   useEffect(() => {
-    if (!coverFile) return;
+    if (!coverFile) { setPairCoverPreview(""); setPairCoverPreviewKey(""); return; }
     const url = URL.createObjectURL(coverFile);
-    const timer = window.setTimeout(() => setPairCoverPreview(url), 0);
+    const timer = window.setTimeout(() => { setPairCoverPreview(url); setPairCoverPreviewKey(filePreviewKey(coverFile)); }, 0);
     return () => { window.clearTimeout(timer); URL.revokeObjectURL(url); };
   }, [coverFile]);
   useEffect(() => {
-    if (!stegoFile) return;
+    if (!stegoFile) { setPairStegoPreview(""); setPairStegoPreviewKey(""); return; }
     const url = URL.createObjectURL(stegoFile);
-    const timer = window.setTimeout(() => setPairStegoPreview(url), 0);
+    const timer = window.setTimeout(() => { setPairStegoPreview(url); setPairStegoPreviewKey(filePreviewKey(stegoFile)); }, 0);
     return () => { window.clearTimeout(timer); URL.revokeObjectURL(url); };
   }, [stegoFile]);
   useEffect(() => {
-    if (!audioCoverFile) return;
+    if (!audioCoverFile) { setAudioCoverPreview(""); setAudioCoverPreviewKey(""); return; }
     const url = URL.createObjectURL(audioCoverFile);
-    const timer = window.setTimeout(() => setAudioCoverPreview(url), 0);
+    const timer = window.setTimeout(() => { setAudioCoverPreview(url); setAudioCoverPreviewKey(filePreviewKey(audioCoverFile)); }, 0);
     return () => { window.clearTimeout(timer); URL.revokeObjectURL(url); };
   }, [audioCoverFile]);
   useEffect(() => {
-    if (!audioStegoFile) return;
+    if (!audioStegoFile) { setAudioStegoPreview(""); setAudioStegoPreviewKey(""); return; }
     const url = URL.createObjectURL(audioStegoFile);
-    const timer = window.setTimeout(() => setAudioStegoPreview(url), 0);
+    const timer = window.setTimeout(() => { setAudioStegoPreview(url); setAudioStegoPreviewKey(filePreviewKey(audioStegoFile)); }, 0);
     return () => { window.clearTimeout(timer); URL.revokeObjectURL(url); };
   }, [audioStegoFile]);
+  useEffect(() => {
+    const cover = pairMedia === "IMAGE" ? coverFile : audioCoverFile;
+    const stego = pairMedia === "IMAGE" ? stegoFile : audioStegoFile;
+    const coverPreviewKey = pairMedia === "IMAGE" ? pairCoverPreviewKey : audioCoverPreviewKey;
+    const stegoPreviewKey = pairMedia === "IMAGE" ? pairStegoPreviewKey : audioStegoPreviewKey;
+    const coverSrc = coverPreviewKey === (cover ? filePreviewKey(cover) : "") ? (pairMedia === "IMAGE" ? pairCoverPreview : audioCoverPreview) : "";
+    const stegoSrc = stegoPreviewKey === (stego ? filePreviewKey(stego) : "") ? (pairMedia === "IMAGE" ? pairStegoPreview : audioStegoPreview) : "";
+    if (!cover || !stego) {
+      setPairDisplay(null);
+      setPairPrepared(null);
+      setPairPreviewLoading(false);
+      return;
+    }
+
+    if (!coverSrc || !stegoSrc) {
+      setPairPrepared(null);
+      setPairPreviewLoading(true);
+      setPairDisplay({
+        left: { src: "", label: pairComparison === "stego-compressed" ? "Original stego" : "Raw cover", name: pairComparison === "stego-compressed" ? stego.name : cover.name },
+        right: { src: "", label: pairRightLabel, name: pairComparison === "cover-stego" ? stego.name : `stego-after-${pairAttackFormat}` },
+      });
+      return;
+    }
+
+    const leftIsStego = pairComparison === "stego-compressed";
+    const left = { src: leftIsStego ? stegoSrc : coverSrc, label: leftIsStego ? "Original stego" : "Raw cover", name: leftIsStego ? stego.name : cover.name };
+    if (pairComparison === "cover-stego") {
+      setPairPrepared(null);
+      setPairPreviewLoading(false);
+      setPairDisplay({ left, right: { src: stegoSrc, label: "Original stego", name: stego.name } });
+      return;
+    }
+
+    const key = pairPreparationKey(pairMedia, pairComparison, pairAttackFormat, cover, stego);
+    let cancelled = false;
+    let temporaryUrl = "";
+    setPairPrepared(null);
+    setPairPreviewLoading(true);
+    setPairDisplay({ left, right: { src: "", label: pairRightLabel, name: `stego-after-${pairAttackFormat}` } });
+    const preparationTimer = window.setTimeout(() => { void (async () => {
+      try {
+        const compressed = pairMedia === "IMAGE"
+          ? await compressImageArtifact(stego, pairAttackFormat as ImageFormat)
+          : await compressAudioArtifact(stego, pairAttackFormat as AudioFormat);
+        const restored = pairMedia === "IMAGE"
+          ? await restoreImageArtifact(artifactFile(compressed.artifact), stego)
+          : await restoreAudioArtifact(artifactFile(compressed.artifact), stego);
+        const restoredFile = artifactFile(restored.artifact);
+        temporaryUrl = URL.createObjectURL(restoredFile);
+        if (cancelled) return;
+        setPairPrepared({ key, file: restoredFile, src: temporaryUrl });
+        setPairDisplay({ left, right: { src: temporaryUrl, label: pairRightLabel, name: restoredFile.name } });
+      } catch (error) {
+        if (!cancelled) setPairError(error instanceof Error ? error.message : "Could not prepare this comparison preview.");
+      } finally {
+        if (!cancelled) setPairPreviewLoading(false);
+      }
+    })(); }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(preparationTimer);
+      if (temporaryUrl) URL.revokeObjectURL(temporaryUrl);
+    };
+  }, [pairMedia, pairComparison, pairAttackFormat, coverFile, stegoFile, audioCoverFile, audioStegoFile, pairCoverPreview, pairStegoPreview, audioCoverPreview, audioStegoPreview, pairCoverPreviewKey, pairStegoPreviewKey, audioCoverPreviewKey, audioStegoPreviewKey, pairRightLabel]);
   useEffect(() => {
     if (!compressedFile) return;
     const url = URL.createObjectURL(compressedFile);
@@ -316,12 +406,28 @@ export function ForensicConsole() {
     setPairRunning(true);
     try {
       let comparedStego = stegoFile;
-      if (pairAttackFormat === "jpeg" || pairAttackFormat === "webp") {
-        const compressed = await compressImageArtifact(stegoFile, pairAttackFormat);
-        const restored = await restoreImageArtifact(artifactFile(compressed.artifact), stegoFile);
-        comparedStego = artifactFile(restored.artifact);
+      let compressedPreview = "";
+      if (pairComparison !== "cover-stego") {
+        const key = pairPreparationKey("IMAGE", pairComparison, pairAttackFormat, coverFile, stegoFile);
+        if (pairPrepared?.key === key) {
+          comparedStego = pairPrepared.file;
+          compressedPreview = pairPrepared.src;
+        } else {
+          if (pairAttackFormat !== "jpeg" && pairAttackFormat !== "webp") throw new Error("Choose a valid image compression format.");
+          const compressed = await compressImageArtifact(stegoFile, pairAttackFormat);
+          const restored = await restoreImageArtifact(artifactFile(compressed.artifact), stegoFile);
+          comparedStego = artifactFile(restored.artifact);
+          compressedPreview = `data:${restored.artifact.mime};base64,${restored.artifact.base64}`;
+        }
       }
-      setPairResult(await analyzeImage(coverFile, comparedStego));
+      const leftFile = pairComparison === "stego-compressed" ? stegoFile : coverFile;
+      const rightFile = pairComparison === "cover-stego" ? stegoFile : comparedStego;
+      const result = await analyzeImage(leftFile, rightFile);
+      setPairDisplay({
+        left: { src: pairComparison === "stego-compressed" ? pairStegoPreview : pairCoverPreview, label: pairLeftLabel, name: leftFile.name },
+        right: { src: pairComparison === "cover-stego" ? pairStegoPreview : compressedPreview, label: pairRightLabel, name: rightFile.name },
+      });
+      setPairResult(result);
     } catch (err) {
       setPairError(err instanceof Error ? err.message : "Analysis failed.");
     } finally {
@@ -337,12 +443,20 @@ export function ForensicConsole() {
     setPairRunning(true);
     try {
       let comparedStego = audioStegoFile;
-      if (pairAttackFormat === "flac" || pairAttackFormat === "mp3") {
-        const compressed = await compressAudioArtifact(audioStegoFile, pairAttackFormat);
-        const restored = await restoreAudioArtifact(artifactFile(compressed.artifact), audioStegoFile);
-        comparedStego = artifactFile(restored.artifact);
+      if (pairComparison !== "cover-stego") {
+        const key = pairPreparationKey("AUDIO", pairComparison, pairAttackFormat, audioCoverFile, audioStegoFile);
+        if (pairPrepared?.key === key) {
+          comparedStego = pairPrepared.file;
+        } else {
+          if (pairAttackFormat !== "flac" && pairAttackFormat !== "mp3") throw new Error("Choose a valid audio compression format.");
+          const compressed = await compressAudioArtifact(audioStegoFile, pairAttackFormat);
+          const restored = await restoreAudioArtifact(artifactFile(compressed.artifact), audioStegoFile);
+          comparedStego = artifactFile(restored.artifact);
+        }
       }
-      setAudioPairResult(await analyzeAudio(audioCoverFile, comparedStego));
+      const leftFile = pairComparison === "stego-compressed" ? audioStegoFile : audioCoverFile;
+      const rightFile = pairComparison === "cover-stego" ? audioStegoFile : comparedStego;
+      setAudioPairResult(await analyzeAudio(leftFile, rightFile));
     } catch (err) {
       setPairError(err instanceof Error ? err.message : "Audio analysis failed.");
     } finally {
@@ -360,11 +474,12 @@ export function ForensicConsole() {
       const image = pairMedia === "IMAGE";
       const extension = image ? "png" : "wav";
       const mime = image ? "image/png" : "audio/wav";
-      const rawFile = new File([coverBlob], `cover-clue-${clue.nodeOrder + 1}.${extension}`, { type: mime });
+      const rawFile = new File([coverBlob], `raw-clue-${clue.nodeOrder + 1}.${extension}`, { type: mime });
       const embeddedFile = new File([stegoBlob], `stego-clue-${clue.nodeOrder + 1}.${extension}`, { type: mime });
       if (image) { setCoverFile(rawFile); setStegoFile(embeddedFile); }
       else { setAudioCoverFile(rawFile); setAudioStegoFile(embeddedFile); }
       setPairCoverClue(clueId);
+      setPairDisplay(null);
       setPairResult(null);
       setAudioPairResult(null);
     } catch (err) {
@@ -422,8 +537,8 @@ export function ForensicConsole() {
           const [stegoBlob, coverBlob] = await Promise.all([stegoResponse.blob(), coverResponse.blob()]);
           const extension = media === "image" ? "png" : "wav";
           const mime = media === "image" ? "image/png" : "audio/wav";
-          file = new File([stegoBlob], `${asset.filename}-stego.${extension}`, { type: mime });
-          coverFile = new File([coverBlob], `${asset.filename}-raw.${extension}`, { type: mime });
+          file = new File([stegoBlob], `stego-${asset.filename}.${extension}`, { type: mime });
+          coverFile = new File([coverBlob], `raw-${asset.filename}.${extension}`, { type: mime });
         }
       } catch (error) {
         rows.push({ filename: asset.filename, media, format: "unavailable", parameter: 0, result: null, status: "ERROR", error: error instanceof Error ? error.message : "Asset unavailable" });
@@ -553,7 +668,7 @@ export function ForensicConsole() {
             <option value="">Choose an asset from a palace…</option>
             {maps.map((map) => <option key={map.id} value={map.id}>{map.title} · {map.clueCount} assets</option>)}
           </select>
-          <select disabled={!assetMapId || assetLoading} defaultValue="" onChange={(event) => void selectMapAsset(event.target.value)} className="rounded-control border border-line bg-canvas px-4 py-3 text-[13px] text-ink disabled:opacity-50">
+          <select disabled={!assetMapId || assetLoading} value={selectedAssetClueId} onChange={(event) => void selectMapAsset(event.target.value)} className="rounded-control border border-line bg-canvas px-4 py-3 text-[13px] text-ink disabled:opacity-50">
             <option value="">{assetLoading ? "Loading palace assets…" : "Select a clue asset…"}</option>
             {assetClues.map((clue, index) => <option key={clue.id} value={clue.id}>Clue {index + 1} · {clue.mediaType}</option>)}
           </select>
@@ -567,6 +682,7 @@ export function ForensicConsole() {
               className="hidden"
               onChange={(event) => {
                 setAttackFile(event.target.files?.[0] ?? null);
+                setSelectedAssetClueId("");
                 setAttackPass("");
                 setAttackRows([]);
                 setBaselineText(null);
@@ -643,10 +759,10 @@ export function ForensicConsole() {
         ) : null}
       </Section>
 
-      <Section title="Pair analysis" subtitle="Compare raw and stego image or audio assets, from a palace clue or local files.">
-        <div className="mb-3 grid gap-3 min-[900px]:grid-cols-4">
-          <select value={pairMedia} onChange={(event) => { setPairMedia(event.target.value as "IMAGE" | "AUDIO"); setPairAttackFormat("original"); setPairCoverClue(""); setCoverFile(null); setStegoFile(null); setAudioCoverFile(null); setAudioStegoFile(null); setPairResult(null); setAudioPairResult(null); }} className="rounded-control border border-line bg-canvas px-3 py-2 text-[12px] text-ink"><option value="IMAGE">Image analysis</option><option value="AUDIO">Audio analysis</option></select>
-              <select value={pairSourceMap} onChange={(event) => { const id = event.target.value; setPairSourceMap(id); setPairCoverClue(""); setPairClues([]); setCoverFile(null); setStegoFile(null); setAudioCoverFile(null); setAudioStegoFile(null); setPairResult(null); setAudioPairResult(null); if (id) void fetchMap(id).then((map) => setPairClues(map.clues)).catch((err) => setPairError(err instanceof Error ? err.message : "Could not load map assets.")); }} className="rounded-control border border-line bg-canvas px-3 py-2 text-[12px] text-ink">
+      <Section title="Pair analysis" subtitle="Compare raw cover vs original stego, raw cover vs compressed stego, or original stego vs compressed stego.">
+        <div className="mb-3 grid gap-3 min-[900px]:grid-cols-3">
+          <select value={pairMedia} onChange={(event) => { const media = event.target.value as "IMAGE" | "AUDIO"; setPairMedia(media); setPairAttackFormat(media === "IMAGE" ? "jpeg" : "flac"); setPairComparison("cover-stego"); setPairDisplay(null); setPairCoverClue(""); setCoverFile(null); setStegoFile(null); setAudioCoverFile(null); setAudioStegoFile(null); setPairResult(null); setAudioPairResult(null); }} className="rounded-control border border-line bg-canvas px-3 py-2 text-[12px] text-ink"><option value="IMAGE">Image analysis</option><option value="AUDIO">Audio analysis</option></select>
+              <select value={pairSourceMap} onChange={(event) => { const id = event.target.value; setPairSourceMap(id); setPairCoverClue(""); setPairClues([]); setCoverFile(null); setStegoFile(null); setAudioCoverFile(null); setAudioStegoFile(null); setPairResult(null); setAudioPairResult(null); setPairDisplay(null); if (id) void fetchMap(id).then((map) => setPairClues(map.clues)).catch((err) => setPairError(err instanceof Error ? err.message : "Could not load map assets.")); }} className="rounded-control border border-line bg-canvas px-3 py-2 text-[12px] text-ink">
             <option value="">Choose palace map…</option>
             {maps.map((map) => <option key={map.id} value={map.id}>{map.title}</option>)}
           </select>
@@ -654,9 +770,15 @@ export function ForensicConsole() {
             <option value="">Select one image clue (raw + stego paired)…</option>
             {pairClues.filter((clue) => clue.mediaType === pairMedia).map((clue, i) => <option key={clue.id} value={clue.id}>Clue {i + 1} · paired {pairMedia.toLowerCase()} files</option>)}
           </select>
-          <select value={pairAttackFormat} onChange={(event) => setPairAttackFormat(event.target.value as ImageFormat | AudioFormat | "original")} className="rounded-control border border-line bg-canvas px-3 py-2 text-[12px] text-ink">
-            <option value="original">Compare original stego</option>
-            {(pairMedia === "IMAGE" ? IMAGE_FORMATS : AUDIO_FORMATS).map((format) => <option key={format} value={format}>After {format.toUpperCase()}</option>)}
+        </div>
+        <div className="mb-3 grid gap-3 min-[900px]:grid-cols-[minmax(0,2fr)_minmax(220px,1fr)]">
+          <select value={pairComparison} onChange={(event) => { setPairComparison(event.target.value as typeof pairComparison); setPairResult(null); setAudioPairResult(null); setPairDisplay(null); }} className="min-w-0 rounded-control border border-line bg-canvas px-3 py-3 text-[12px] text-ink">
+            <option value="cover-stego">Raw cover vs original stego</option>
+            <option value="cover-compressed">Raw cover vs stego after compression</option>
+            <option value="stego-compressed">Original stego vs stego after compression</option>
+          </select>
+          <select disabled={pairComparison === "cover-stego"} value={pairAttackFormat} onChange={(event) => { setPairAttackFormat(event.target.value as ImageFormat | AudioFormat); setPairResult(null); setAudioPairResult(null); setPairDisplay(null); }} className="min-w-0 rounded-control border border-line bg-canvas px-3 py-3 text-[12px] text-ink disabled:opacity-50">
+            {(pairMedia === "IMAGE" ? IMAGE_FORMATS : AUDIO_FORMATS).map((format) => <option key={format} value={format}>{format.toUpperCase()} compression</option>)}
           </select>
         </div>
         <p className="mb-3 text-center font-mono text-[10px] uppercase text-muted">Or upload a pair</p>
@@ -667,7 +789,7 @@ export function ForensicConsole() {
               type="file"
               accept="image/png"
               className="hidden"
-              onChange={(event) => { setCoverFile(event.target.files?.[0] ?? null); setPairCoverClue(""); setPairResult(null); }}
+              onChange={(event) => { setCoverFile(event.target.files?.[0] ?? null); setPairCoverClue(""); setPairResult(null); setPairDisplay(null); }}
             />
           </label>
           <label className="inline-flex min-h-[44px] cursor-pointer items-center rounded-control border border-line px-4 text-[13px] hover:bg-raised">
@@ -676,21 +798,19 @@ export function ForensicConsole() {
               type="file"
               accept="image/png"
               className="hidden"
-              onChange={(event) => { setStegoFile(event.target.files?.[0] ?? null); setPairCoverClue(""); setPairResult(null); }}
+              onChange={(event) => { setStegoFile(event.target.files?.[0] ?? null); setPairCoverClue(""); setPairResult(null); setPairDisplay(null); }}
             />
           </label>
         </div> : <div className="grid gap-3 min-[900px]:grid-cols-2">
           <label className="inline-flex min-h-[44px] cursor-pointer items-center rounded-control border border-line px-4 text-[13px] hover:bg-raised">{audioCoverFile?.name ?? "Choose raw cover WAV"}<input type="file" accept="audio/wav" className="hidden" onChange={(event) => { setAudioCoverFile(event.target.files?.[0] ?? null); setPairCoverClue(""); setAudioPairResult(null); }} /></label>
           <label className="inline-flex min-h-[44px] cursor-pointer items-center rounded-control border border-line px-4 text-[13px] hover:bg-raised">{audioStegoFile?.name ?? "Choose stego WAV"}<input type="file" accept="audio/wav" className="hidden" onChange={(event) => { setAudioStegoFile(event.target.files?.[0] ?? null); setPairCoverClue(""); setAudioPairResult(null); }} /></label>
         </div>}
-        {pairMedia === "IMAGE" && coverFile && stegoFile ? <div className="mt-4 grid gap-4 rounded-card border border-line bg-canvas p-4 min-[900px]:grid-cols-2">
-          {([[coverFile, pairCoverPreview, "Original cover"], [stegoFile, pairStegoPreview, "Embedded stego"]] as const).map(([file, src, label]) => (
-            <div key={label}><div className="mb-2 flex justify-between text-[11px] text-muted"><span>{label}</span><span>{file.name} · {formatBytes(file.size)}</span></div><button type="button" onClick={() => setPairFullscreen(true)} className="w-full cursor-zoom-in"><ImagePreview src={src} alt={label} /></button></div>
-          ))}
+        {pairMedia === "IMAGE" && pairDisplay ? <div className="mt-4 grid gap-4 rounded-card border border-line bg-canvas p-4 min-[900px]:grid-cols-2">
+          {[pairDisplay.left, pairDisplay.right].map(({ src, label, name }) => <div key={label}><div className="mb-2 flex justify-between gap-2 text-[11px] text-muted"><span>{label}</span><span className="truncate">{name}</span></div>{src ? <button type="button" disabled={pairPreviewLoading} onClick={() => setPairFullscreen(true)} className="w-full cursor-zoom-in disabled:cursor-wait"><ImagePreview src={src} alt={label} /></button> : <div className="grid min-h-48 place-items-center border border-dashed border-line text-[11px] text-muted">Preparing {label} preview…</div>}</div>)}
         </div> : null}
-        {pairMedia === "AUDIO" && audioCoverFile && audioStegoFile ? <div className="mt-4 grid gap-4 rounded-card border border-line bg-canvas p-4 min-[900px]:grid-cols-2">{[[audioCoverFile, audioCoverPreview, "Raw cover audio"], [audioStegoFile, audioStegoPreview, "Stego audio"]].map(([file,src,label]) => <div key={label as string}><p className="mb-2 text-[11px] text-muted">{label as string} · {(file as File).name} · {formatBytes((file as File).size)}</p><audio controls preload="metadata" src={src as string} className="w-full" /></div>)}</div> : null}
+        {pairMedia === "AUDIO" && pairDisplay ? <div className="mt-4 grid gap-4 rounded-card border border-line bg-canvas p-4 min-[900px]:grid-cols-2">{[pairDisplay.left, pairDisplay.right].map(({ src, label, name }) => <div key={label}><p className="mb-2 text-[11px] text-muted">{label} · {name}</p>{src ? <audio controls preload="metadata" src={src} className="w-full" /> : <div className="grid min-h-12 place-items-center border border-dashed border-line text-[11px] text-muted">Preparing audio preview…</div>}</div>)}</div> : null}
         <div className="mt-3">
-          {pairMedia === "IMAGE" ? <Button disabled={!coverFile || !stegoFile || pairRunning} onClick={runPair}>{pairRunning ? "Analyzing…" : `Analyze image · ${pairAttackFormat.toUpperCase()}`}</Button> : <Button disabled={!audioCoverFile || !audioStegoFile || pairRunning} onClick={runAudioPair}>{pairRunning ? "Analyzing…" : `Analyze audio · ${pairAttackFormat.toUpperCase()}`}</Button>}
+          {pairMedia === "IMAGE" ? <Button disabled={!coverFile || !stegoFile || pairRunning || pairPreviewLoading} onClick={runPair}>{pairRunning ? "Analyzing…" : pairPreviewLoading ? "Preparing comparison…" : `Analyze image · ${pairComparison === "cover-stego" ? "ORIGINAL PAIR" : pairAttackFormat.toUpperCase()}`}</Button> : <Button disabled={!audioCoverFile || !audioStegoFile || pairRunning || pairPreviewLoading} onClick={runAudioPair}>{pairRunning ? "Analyzing…" : pairPreviewLoading ? "Preparing comparison…" : `Analyze audio · ${pairComparison === "cover-stego" ? "ORIGINAL PAIR" : pairAttackFormat.toUpperCase()}`}</Button>}
         </div>
         {pairError ? <div className="mt-3"><ErrorBanner message={pairError} /></div> : null}
         {pairMedia === "IMAGE" && pairResult ? (
@@ -704,10 +824,10 @@ export function ForensicConsole() {
               <MetricCard label="Identical" value={pairResult.metrics.identical ? "TRUE" : "FALSE"} />
             </div>
             <div className="flex items-center justify-between">
-              <h3 className="text-[15px] font-medium">Combined RGB histogram · raw cover vs {pairAttackFormat === "original" ? "original stego" : `${pairAttackFormat.toUpperCase()} restored stego`}</h3>
+              <h3 className="text-[15px] font-medium">Combined RGB histogram · {pairLeftLabel} vs {pairRightLabel}</h3>
             </div>
             <HistogramChart cover={pairResult.histograms.cover} stego={pairResult.histograms.stego} />
-            <div><h3 className="mb-2 text-[13px] font-medium">Enhanced LSB · grayscale channel planes</h3><div className="space-y-5">{([['r','Red'],['g','Green'],['b','Blue']] as const).map(([channel,label]) => <div key={channel}><h4 className="mb-2 text-[12px] text-muted">{label}</h4><div className="grid gap-4 min-[900px]:grid-cols-2"><div><p className="mb-1 text-[10px] text-muted">Cover</p><ImagePreview src={`data:image/png;base64,${pairResult.lsbChannels.cover[channel]}`} alt={`${label} cover LSB plane`} /></div><div><p className="mb-1 text-[10px] text-muted">Stego</p><ImagePreview src={`data:image/png;base64,${pairResult.lsbChannels.stego[channel]}`} alt={`${label} stego LSB plane`} /></div></div></div>)}</div></div>
+            <div><h3 className="mb-2 text-[13px] font-medium">Enhanced LSB · grayscale channel planes</h3><div className="space-y-5">{([['r','Red'],['g','Green'],['b','Blue']] as const).map(([channel,label]) => <div key={channel}><h4 className="mb-2 text-[12px] text-muted">{label}</h4><div className="grid gap-4 min-[900px]:grid-cols-2"><div><p className="mb-1 text-[10px] text-muted">{pairLeftLabel}</p><ImagePreview src={`data:image/png;base64,${pairResult.lsbChannels.cover[channel]}`} alt={`${label} ${pairLeftLabel} LSB plane`} /></div><div><p className="mb-1 text-[10px] text-muted">{pairRightLabel}</p><ImagePreview src={`data:image/png;base64,${pairResult.lsbChannels.stego[channel]}`} alt={`${label} ${pairRightLabel} LSB plane`} /></div></div></div>)}</div></div>
           </div>
         ) : null}
         {pairMedia === "AUDIO" && audioPairResult ? <div className="mt-4 space-y-4">
@@ -719,10 +839,16 @@ export function ForensicConsole() {
             <MetricCard label="PSNR" value={audioPairResult.metrics.psnrDb == null ? "∞" : `${audioPairResult.metrics.psnrDb.toFixed(2)} dB`} />
             <MetricCard label="PCM identical" value={audioPairResult.metrics.identical ? "YES" : "NO"} />
           </div>
-          <div><h3 className="mb-2 text-[13px] font-medium">Audio comparison over time · raw cover vs {pairAttackFormat === "original" ? "original stego" : `${pairAttackFormat.toUpperCase()} restored stego`}</h3><AudioComparisonChart cover={audioPairResult.waveform.cover} stego={audioPairResult.waveform.stego} changedRate={audioPairResult.waveform.changedRate} /></div>
+          <div><h3 className="mb-2 text-[13px] font-medium">Audio comparison over time · {pairLeftLabel} vs {pairRightLabel}</h3><AudioComparisonChart cover={audioPairResult.waveform.cover} stego={audioPairResult.waveform.stego} changedRate={audioPairResult.waveform.changedRate} /></div>
           <p className="text-[11px] text-muted">PCM samples are 16-bit values. For LSB steganography, MSE can be near zero and PSNR very high because only a small fraction of samples change by one least significant bit; changed-sample rate and mean delta show that more directly.</p>
         </div> : null}
-        {pairFullscreen && coverFile && stegoFile ? <div role="dialog" aria-modal="true" aria-label="Full size image comparison" className="fixed inset-0 z-[70] grid place-items-center bg-black/95 p-6" onClick={() => setPairFullscreen(false)}><button type="button" className="absolute right-5 top-5 rounded-control border border-white/30 px-4 py-2 text-white">Close ✕</button><div className="grid w-full grid-cols-2 gap-4">{[[pairCoverPreview, "Original cover"], [pairStegoPreview, "Embedded image"]].map(([src, label]) => <div key={label}><p className="mb-2 text-center text-white">{label}</p><ImagePreview src={src} alt={label} className="h-[82vh] w-full bg-transparent object-contain" /></div>)}</div></div> : null}
+        {pairFullscreen && pairDisplay?.left.src && pairDisplay.right.src && typeof document !== "undefined" ? createPortal(
+          <div role="dialog" aria-modal="true" aria-label="Full size image comparison" className="fixed inset-0 z-[100] bg-black/98 p-3 sm:p-6" onClick={() => setPairFullscreen(false)}>
+            <button type="button" className="absolute right-4 top-4 z-10 rounded-control border border-white/30 bg-black/80 px-4 py-2 text-white sm:right-6 sm:top-6">Close ✕</button>
+            <div className="grid h-full w-full grid-cols-2 gap-2 pt-12 sm:gap-5 sm:pt-2" onClick={(event) => event.stopPropagation()}>
+              {[pairDisplay.left, pairDisplay.right].map(({ src, label, name }) => <section key={label} className="flex min-h-0 min-w-0 flex-col border border-accent/30 bg-[#0c0c0c] p-1.5 sm:p-3"><div className="mb-2 flex shrink-0 flex-col gap-1 text-[10px] text-white sm:flex-row sm:items-center sm:justify-between sm:text-[11px]"><strong>{label}</strong><span className="truncate font-mono text-muted">{name}</span></div><div className="grid min-h-0 flex-1 place-items-center"><ImagePreview src={src} alt={label} className="p5-zoom-enter max-h-full max-w-full object-contain" /></div></section>)}
+            </div>
+          </div>, document.body) : null}
       </Section>
 
       <Section title="Palace asset audit" subtitle="Compare the original cover and stego against each other and against every JPEG/WebP or FLAC/MP3 restored result.">
@@ -731,7 +857,7 @@ export function ForensicConsole() {
           <Button variant={auditSource === "upload" ? "primary" : "secondary"} onClick={() => setAuditSource("upload")}>Upload custom assets</Button>
         </div>
         {auditSource === "map" ? <>
-          <select value={auditMapId} onChange={(event) => { const id = event.target.value; setAuditMapId(id); setBatchAssetIds([]); setAuditClues([]); if (id) void fetchMap(id).then((detail) => { setAuditClues(detail.clues); setBatchPassphrases((prev) => Object.fromEntries([...Object.entries(prev), ...detail.clues.map((clue) => [clue.id, prev[clue.id] ?? clue.passphrase ?? ""]) ])); }).catch((error) => setPairError(error instanceof Error ? error.message : "Could not load palace assets.")); }} className="mb-3 w-full rounded-control border border-line bg-canvas px-4 py-3 text-[13px] text-ink">
+          <select value={auditMapId} onChange={(event) => { const id = event.target.value; setAuditMapId(id); setBatchAssetIds([]); setBatchPassphrases({}); setAuditClues([]); if (id) void Promise.all([fetchMap(id), fetchMapForensicPassphrases(id)]).then(([detail, passphrases]) => { setAuditClues(detail.clues); setBatchPassphrases(Object.fromEntries(detail.clues.map((clue) => [clue.id, passphrases[clue.id] ?? clue.passphrase ?? ""]))); }).catch((error) => setPairError(error instanceof Error ? error.message : "Could not load palace assets.")); }} className="mb-3 w-full rounded-control border border-line bg-canvas px-4 py-3 text-[13px] text-ink">
             <option value="">Choose palace to audit…</option>{maps.map((map) => <option key={map.id} value={map.id}>{map.title} · {map.clueCount} assets</option>)}
           </select>
         </> : <label className="mb-3 inline-flex min-h-[44px] cursor-pointer items-center rounded-control border border-line px-4 text-[13px] hover:bg-raised">{auditUploads.length ? `${auditUploads.length} custom file(s) selected` : "Choose stego PNG or WAV files"}<input type="file" multiple accept="image/png,audio/wav" className="hidden" onChange={(event) => { setAuditUploads(Array.from(event.target.files ?? [])); setBatchPassphrases({}); setBatchAssetIds([]); event.target.value = ""; }} /></label>}
@@ -797,7 +923,7 @@ function Section({
 }) {
   const number = title.toLowerCase().includes("manual") ? "01" : title.toLowerCase().includes("pair") ? "02" : "03";
   return (
-    <section className="p5-panel p5-cut-sm rounded-card p-5">
+    <section className="p5-panel p5-cut-sm rounded-card p5-section-reveal p-5" style={{ animationDelay: `${220 + (Number(number) - 1) * 100}ms` }}>
       <div className="section-heading mt-0"><span>{number}</span><div><h2 className="p5-heading text-heading">{title}</h2><p>{subtitle}</p></div></div>
       <div className="mt-4">{children}</div>
     </section>
@@ -820,7 +946,7 @@ function StageStep({ number, title, children }: { number: string; title: string;
 
 function StagePreview({ title, file, src, playbackSrc }: { title: string; file: File; src: string; playbackSrc?: string }) {
   const [expanded, setExpanded] = useState(false);
-  return <div className="mt-3 rounded-control border border-line bg-surface p-3"><div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="text-[12px] font-medium text-ink">{title}</p><div className="flex items-center gap-3"><p className="font-mono text-[10px] text-muted">{file.name} · {formatBytes(file.size)}</p><a href={src} download={file.name} className="text-[10px] text-accent hover:underline">Download</a></div></div>{file.type.startsWith("image/") ? <><button type="button" onClick={() => setExpanded(true)} className="block w-full cursor-zoom-in" aria-label="View image fullscreen"><ImagePreview src={src} alt={title} className="max-h-80 w-full rounded-control border border-line bg-canvas object-contain" /><span className="mt-1 block text-right text-[10px] text-muted">Click to expand</span></button>{expanded ? <div role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-[80] grid place-items-center bg-black/95 p-5" onClick={() => setExpanded(false)}><button type="button" className="absolute right-5 top-5 rounded-control border border-white/30 px-4 py-2 text-white">Close ✕</button><ImagePreview src={src} alt={title} className="max-h-[92vh] max-w-[94vw] rounded-none border-0 bg-transparent object-contain" /></div> : null}</> : <><audio controls preload="auto" src={playbackSrc ?? src} className="w-full" />{playbackSrc ? <p className="mt-1 text-[10px] text-muted">Playback uses a complete WAV decode of this FLAC; download above is the original FLAC.</p> : null}</>}</div>;
+  return <div className="mt-3 rounded-control border border-line bg-surface p-3"><div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="text-[12px] font-medium text-ink">{title}</p><div className="flex items-center gap-3"><p className="font-mono text-[10px] text-muted">{file.name} · {formatBytes(file.size)}</p><a href={src} download={file.name} className="text-[10px] text-accent hover:underline">Download</a></div></div>{file.type.startsWith("image/") ? <><button type="button" onClick={() => setExpanded(true)} className="block w-full cursor-zoom-in" aria-label="View image fullscreen"><ImagePreview src={src} alt={title} className="max-h-80 w-full rounded-control border border-line bg-canvas object-contain" /><span className="mt-1 block text-right text-[10px] text-muted">Click to expand</span></button>{expanded && typeof document !== "undefined" ? createPortal(<div role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-[100] grid place-items-center bg-black/98 p-3 sm:p-6" onClick={() => setExpanded(false)}><button type="button" className="absolute right-4 top-4 z-10 rounded-control border border-white/30 bg-black/80 px-4 py-2 text-white sm:right-6 sm:top-6">Close ✕</button><ImagePreview src={src} alt={title} className="p5-zoom-enter max-h-[94vh] max-w-[96vw] rounded-none border-0 bg-transparent object-contain" /></div>, document.body) : null}</> : <><audio controls preload="auto" src={playbackSrc ?? src} className="w-full" />{playbackSrc ? <p className="mt-1 text-[10px] text-muted">Playback uses a complete WAV decode of this FLAC; download above is the original FLAC.</p> : null}</>}</div>;
 }
 
 function formatBytes(bytes: number) {

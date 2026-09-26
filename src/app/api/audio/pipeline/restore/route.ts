@@ -23,8 +23,10 @@ export async function POST(request: Request) {
       : { ...original, samples: await decodeFlacBytes(compressedBytes) };
     if (restoredCarrier.samples.length !== original.samples.length) throw ApiError.mediaMismatch("Decoded audio sample count differs from the original WAV.");
     const restored = encodeWav(restoredCarrier);
+    const format = isMp3 ? "mp3" : "flac";
+    const sourceStem = source.name.replace(/\.[^.]+$/, "").replace(/-ori$/, "");
     return jsonOk({
-      artifact: { name: compressed.name.split(".").slice(0, -1).join(".") + "-restored.wav", mime: "audio/wav", size: restored.length, base64: toBase64(restored) },
+      artifact: { name: `${sourceStem}-after-${format}.wav`, mime: "audio/wav", size: restored.length, base64: toBase64(restored) },
       metrics: audioMetrics(original, restoredCarrier).metrics,
       pcmIdentical: samplesIdentical(original.samples, restoredCarrier.samples),
     });
