@@ -47,6 +47,46 @@ async function postForm<T>(url: string, form: FormData): Promise<T> {
   return data as T;
 }
 
+export interface ExtractionProgress { completed: number; total: number; label: string }
+
+async function postProgressForm<T>(url: string, form: FormData, onProgress: (progress: ExtractionProgress) => void): Promise<T> {
+  const response = await fetch(`${url}?progress=1`, { method: "POST", body: form });
+  if (!response.ok || !response.body) {
+    const data = await response.json().catch(() => null) as { error?: { message?: string; code?: string } } | null;
+    throw new ApiClientError(data?.error?.message ?? "Extraction failed.", data?.error?.code ?? null, null, response.status);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let pending = "";
+  const state: { result: T | null; error: { error?: { message?: string; code?: string } } | null } = { result: null, error: null };
+  const consume = (line: string) => {
+    if (!line.trim()) return;
+    const event = JSON.parse(line) as {
+      type: "progress" | "result" | "error";
+      completed?: number;
+      total?: number;
+      label?: string;
+      body?: T & { error?: { message?: string; code?: string } };
+    };
+    if (event.type === "progress" && event.completed !== undefined && event.total !== undefined && event.label) {
+      onProgress({ completed: event.completed, total: event.total, label: event.label });
+    } else if (event.type === "result") state.result = event.body ?? null;
+    else if (event.type === "error") state.error = event.body ?? null;
+  };
+  while (true) {
+    const { done, value } = await reader.read();
+    pending += decoder.decode(value, { stream: !done });
+    const lines = pending.split("\n");
+    pending = lines.pop() ?? "";
+    for (const line of lines) consume(line);
+    if (done) break;
+  }
+  if (pending.trim()) consume(pending);
+  if (state.error) throw new ApiClientError(state.error.error?.message ?? "Extraction failed.", state.error.error?.code ?? null, null, response.status);
+  if (state.result === null) throw new ApiClientError("The server returned an invalid extraction response.", null, null, response.status);
+  return state.result;
+}
+
 function formWithFile(file: File, extra: Record<string, string> = {}): FormData {
   const form = new FormData();
   form.set("file", file);
@@ -92,11 +132,11 @@ export function embedImage(file: File, message: string, passphrase: string) {
   );
 }
 
-export function extractImage(file: File, passphrase: string) {
-  return postForm<ExtractResponse>(
-    "/api/image/extract",
-    formWithFile(file, { passphrase }),
-  );
+export function extractImage(file: File, passphrase: string, onProgress?: (progress: ExtractionProgress) => void) {
+  const form = formWithFile(file, { passphrase });
+  return onProgress
+    ? postProgressForm<ExtractResponse>("/api/image/extract", form, onProgress)
+    : postForm<ExtractResponse>("/api/image/extract", form);
 }
 
 export function analyzeImage(cover: File, stego: File) {
@@ -124,11 +164,11 @@ export function embedAudio(file: File, message: string, passphrase: string) {
   );
 }
 
-export function extractAudio(file: File, passphrase: string) {
-  return postForm<ExtractResponse>(
-    "/api/audio/extract",
-    formWithFile(file, { passphrase }),
-  );
+export function extractAudio(file: File, passphrase: string, onProgress?: (progress: ExtractionProgress) => void) {
+  const form = formWithFile(file, { passphrase });
+  return onProgress
+    ? postProgressForm<ExtractResponse>("/api/audio/extract", form, onProgress)
+    : postForm<ExtractResponse>("/api/audio/extract", form);
 }
 
 export function compressAudio(file: File, passphrase: string, format: "flac" | "mp3") {
@@ -216,7 +256,14 @@ export interface PublishInput {
   clues: ClueInput[];
 }
 
-export function publishMap(input: PublishInput) {
+export interface PublishProgress {
+  phase: "encrypting" | "saving" | "complete";
+  completed: number;
+  total: number;
+  clueNumber?: number;
+}
+
+export function publishMap(input: PublishInput, onProgress?: (progress: PublishProgress) => void) {
   const form = new FormData();
   form.set("title", input.title);
   form.set("authorName", input.authorName);
@@ -243,7 +290,71 @@ export function publishMap(input: PublishInput) {
     ),
   );
   input.clues.forEach((clue, index) => form.set(`cover_${index}`, clue.cover));
-  return postForm<{ id: string; title: string; clueCount: number }>("/api/maps", form);
+  return new Promise<{ id: string; title: string; clueCount: number }>((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", "/api/maps?progress=1");
+    let consumedLength = 0;
+    let pending = "";
+    let result: { id?: string; title?: string; clueCount?: number } | null = null;
+    let serverError: { error?: { message?: string; code?: string; field?: string } } | null = null;
+    const consumeProgress = () => {
+      const chunk = request.responseText.slice(consumedLength);
+      consumedLength = request.responseText.length;
+      pending += chunk;
+      const lines = pending.split("\n");
+      pending = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line) continue;
+        try {
+          const event = JSON.parse(line) as {
+            type: "progress" | "result" | "error";
+            phase?: "encrypting" | "saving";
+            completed?: number;
+            total?: number;
+            clueNumber?: number;
+            body?: typeof result & typeof serverError;
+          };
+          if (event.type === "progress" && event.phase && event.completed !== undefined && event.total !== undefined) {
+            onProgress?.({ phase: event.phase, completed: event.completed, total: event.total, clueNumber: event.clueNumber });
+          } else if (event.type === "result") result = event.body ?? null;
+          else if (event.type === "error") serverError = event.body ?? null;
+        } catch {
+          // Ignore incomplete/malformed stream chunks; the terminal response is validated below.
+        }
+      }
+    };
+    request.addEventListener("progress", consumeProgress);
+    request.addEventListener("load", () => {
+      try {
+        consumeProgress();
+        if (pending.trim()) {
+          const event = JSON.parse(pending) as { type: string; body?: typeof result & typeof serverError };
+          if (event.type === "result") result = event.body ?? null;
+          if (event.type === "error") serverError = event.body ?? null;
+        }
+      } catch {
+        reject(new Error("The server returned an invalid palace response."));
+        return;
+      }
+      if (request.status < 200 || request.status >= 300) {
+        reject(new ApiClientError(serverError?.error?.message ?? "Request failed.", serverError?.error?.code ?? null, serverError?.error?.field ?? null, request.status));
+        return;
+      }
+      if (serverError) {
+        reject(new ApiClientError(serverError.error?.message ?? "Request failed.", serverError.error?.code ?? null, serverError.error?.field ?? null, 400));
+        return;
+      }
+      if (!result?.id || !result.title || typeof result.clueCount !== "number") {
+        reject(new Error("The server returned an invalid palace response."));
+        return;
+      }
+      onProgress?.({ phase: "complete", completed: result.clueCount, total: result.clueCount });
+      resolve({ id: result.id, title: result.title, clueCount: result.clueCount });
+    });
+    request.addEventListener("error", () => reject(new Error("Network request failed.")));
+    request.addEventListener("abort", () => reject(new Error("Request was cancelled.")));
+    request.send(form);
+  });
 }
 
 export async function fetchMap(id: string): Promise<MapDetail> {
@@ -261,22 +372,47 @@ export async function fetchMapForensicPassphrases(id: string): Promise<Record<st
   return data.passphrases;
 }
 
-export async function extractClue(id: string, passphrase: string): Promise<ExtractResponse> {
-  const response = await fetch(`/api/clues/${id}/extract`, {
+export async function extractClue(id: string, passphrase: string, onProgress?: (progress: ExtractionProgress) => void): Promise<ExtractResponse> {
+  const response = await fetch(`/api/clues/${id}/extract?progress=1`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ passphrase }),
   });
-  const data = (await response.json().catch(() => null)) as
-    | { error?: { message?: string; code?: string } }
-    | null;
-  if (!response.ok) {
-    throw new ApiClientError(
-      data?.error?.message ?? "Extraction failed.",
-      data?.error?.code ?? null,
-      null,
-      response.status,
-    );
+  if (!response.ok || !response.body) {
+    const data = await response.json().catch(() => null) as { error?: { message?: string; code?: string } } | null;
+    throw new ApiClientError(data?.error?.message ?? "Extraction failed.", data?.error?.code ?? null, null, response.status);
   }
-  return data as ExtractResponse;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let pending = "";
+  const streamResult: {
+    result: ExtractResponse | null;
+    failure: { error?: { message?: string; code?: string } } | null;
+  } = { result: null, failure: null };
+  const consume = (line: string) => {
+    if (!line.trim()) return;
+    const event = JSON.parse(line) as {
+      type: "progress" | "result" | "error";
+      completed?: number;
+      total?: number;
+      label?: string;
+      body?: ExtractResponse & { error?: { message?: string; code?: string } };
+    };
+    if (event.type === "progress" && event.completed !== undefined && event.total !== undefined && event.label) {
+      onProgress?.({ completed: event.completed, total: event.total, label: event.label });
+    } else if (event.type === "result") streamResult.result = event.body ?? null;
+    else if (event.type === "error") streamResult.failure = event.body ?? null;
+  };
+  while (true) {
+    const { done, value } = await reader.read();
+    pending += decoder.decode(value, { stream: !done });
+    const lines = pending.split("\n");
+    pending = lines.pop() ?? "";
+    for (const line of lines) consume(line);
+    if (done) break;
+  }
+  if (pending.trim()) consume(pending);
+  if (streamResult.failure) throw new ApiClientError(streamResult.failure.error?.message ?? "Extraction failed.", streamResult.failure.error?.code ?? null, null, response.status);
+  if (!streamResult.result) throw new ApiClientError("The server returned an invalid extraction response.", null, null, response.status);
+  return streamResult.result;
 }

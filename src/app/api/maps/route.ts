@@ -139,7 +139,9 @@ async function processClue(desc: ClueDescriptor, cover: File): Promise<Processed
   return { coverData, mediaData, mediaMime: WAV_MIME, mse: metrics.mse, psnrDb: metrics.psnrDb };
 }
 
-export async function POST(request: Request) {
+interface MapPublishProgress { phase: "encrypting" | "saving"; completed: number; total: number; clueNumber?: number }
+
+async function createMap(request: Request, onProgress?: (progress: MapPublishProgress) => Promise<void>) {
   return runHandler(async () => {
     const user = await requireUser();
     const form = await request.formData();
@@ -188,9 +190,12 @@ export async function POST(request: Request) {
       if (!(cover instanceof File)) {
         throw ApiError.badRequest(`Missing cover file for clue ${i}.`, `cover_${i}`);
       }
+      await onProgress?.({ phase: "encrypting", completed: i, total: clues.length, clueNumber: i + 1 });
       processed.push(await processClue(clues[i], cover));
+      await onProgress?.({ phase: "encrypting", completed: i + 1, total: clues.length, clueNumber: i + 1 });
     }
 
+    await onProgress?.({ phase: "saving", completed: clues.length, total: clues.length });
     const map = await prisma.map.create({
       data: {
         title,
@@ -226,6 +231,27 @@ export async function POST(request: Request) {
 
     return jsonOk({ id: map.id, title: map.title, clueCount: map.clueNodes.length }, 201);
   });
+}
+
+export async function POST(request: Request) {
+  if (new URL(request.url).searchParams.get("progress") !== "1") return createMap(request);
+
+  const encoder = new TextEncoder();
+  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+  const writer = writable.getWriter();
+  const send = async (event: unknown) => writer.write(encoder.encode(`${JSON.stringify(event)}\n`));
+  void (async () => {
+    try {
+      const response = await createMap(request, (progress) => send({ type: "progress", ...progress }));
+      const body = await response.json();
+      await send(response.ok ? { type: "result", body } : { type: "error", body });
+    } catch {
+      await send({ type: "error", body: { error: { message: "Could not publish this palace." } } });
+    } finally {
+      await writer.close();
+    }
+  })();
+  return new Response(readable, { headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" } });
 }
 
 export async function GET() {

@@ -337,7 +337,40 @@ const idText: Record<string, string> = {
   "Raw cover vs stego after JPEG": "Sampul asli vs stego setelah JPEG",
   "Raw cover vs stego after WebP": "Sampul asli vs stego setelah WebP",
   "Raw cover vs stego after FLAC": "Sampul asli vs stego setelah FLAC",
-  "Raw cover vs stego after MP3": "Sampul asli vs stego setelah MP3"
+  "Raw cover vs stego after MP3": "Sampul asli vs stego setelah MP3",
+  "Encrypting clue payloads…": "Mengenkripsi payload petunjuk…",
+  "NEW GAME →": "PERMAINAN BARU →",
+  "DELETE": "HAPUS",
+  "STARTING…": "MEMULAI…",
+  "CONFIRM DELETE": "KONFIRMASI HAPUS",
+  "START NEW GAME": "MULAI PERMAINAN BARU",
+  "CANCEL": "BATAL",
+  "PROCESSING…": "MEMPROSES…",
+  "Saving encrypted palace…": "Menyimpan istana terenkripsi…",
+  "Encryption complete. Opening lobby…": "Enkripsi selesai. Membuka lobi…",
+  "Palace saved. Opening lobby…": "Istana tersimpan. Membuka lobi…",
+  "Decrypting clue and checking the passphrase…": "Mendekripsi petunjuk dan memeriksa kata sandi…",
+  "Preparing clue decryption…": "Menyiapkan dekripsi petunjuk…",
+  "Decrypting clue payload…": "Mendekripsi payload petunjuk…",
+  "Saving recovered clue…": "Menyimpan petunjuk yang ditemukan…",
+  "Decryption complete.": "Dekripsi selesai.",
+  "Preparing media decryption…": "Menyiapkan dekripsi media…",
+  "Preparing image decryption…": "Menyiapkan dekripsi gambar…",
+  "Decrypting image payload…": "Mendekripsi payload gambar…",
+  "Image decryption complete.": "Dekripsi gambar selesai.",
+  "Preparing audio decryption…": "Menyiapkan dekripsi audio…",
+  "Decrypting audio payload…": "Mendekripsi payload audio…",
+  "Audio decryption complete.": "Dekripsi audio selesai.",
+  "Decrypting original asset and checking passphrase…": "Mendekripsi aset asli dan memeriksa kata sandi…",
+  "Decrypting restored asset and checking passphrase…": "Mendekripsi aset hasil pemulihan dan memeriksa kata sandi…",
+  "Preparing palace audit…": "Menyiapkan audit istana…",
+  "Audit complete.": "Audit selesai.",
+  "Comparing original files for asset": "Membandingkan berkas asli untuk aset",
+  "Decrypting, compressing, restoring, and comparing": "Mendekripsi, mengompres, memulihkan, dan membandingkan",
+  "Skipping unavailable asset": "Melewati aset yang tidak tersedia",
+  "Finished": "Selesai",
+  "of": "dari",
+  "Only the palace creator can delete this map.": "Hanya pembuat palace yang dapat menghapus peta ini."
 };
 
 function translateText(source: string, language: Language): string {
@@ -399,6 +432,18 @@ function translateText(source: string, language: Language): string {
   if (match) return `Kompres ke ${match[1]}`;
   match = source.match(/^Restore (PNG|WAV)$/);
   if (match) return `Pulihkan ${match[1]}`;
+  match = source.match(/^Loading asset (\d+) of (\d+)…$/);
+  if (match) return `Memuat aset ${match[1]} dari ${match[2]}…`;
+  match = source.match(/^Encrypting clue (\d+) of (\d+)…$/);
+  if (match) return `Mengenkripsi petunjuk ${match[1]} dari ${match[2]}…`;
+  match = source.match(/^Comparing original files for asset (\d+) of (\d+)…$/);
+  if (match) return `Membandingkan berkas asli untuk aset ${match[1]} dari ${match[2]}…`;
+  match = source.match(/^Skipping unavailable asset (\d+) of (\d+)\.$/);
+  if (match) return `Melewati aset ${match[1]} dari ${match[2]} karena tidak tersedia.`;
+  match = source.match(/^Decrypting, compressing, restoring, and comparing (JPEG|WEBP|FLAC|MP3)…$/);
+  if (match) return `Mendekripsi, mengompres, memulihkan, dan membandingkan ${match[1]}…`;
+  match = source.match(/^Finished (JPEG|WEBP|FLAC|MP3) for asset (\d+) of (\d+)\.$/);
+  if (match) return `Selesai memproses ${match[1]} untuk aset ${match[2]} dari ${match[3]}.`;
   match = source.match(/^(.+) compression$/);
   if (match) return `Kompresi ${match[1]}`;
   match = source.match(/^Move (north|south|east|west)$/i);

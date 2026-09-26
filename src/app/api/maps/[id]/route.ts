@@ -71,3 +71,18 @@ export async function GET(
     });
   });
 }
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  return runHandler(async () => {
+    const user = await requireUser();
+    const { id } = await params;
+    const map = await prisma.map.findUnique({ where: { id }, select: { id: true, authorId: true } });
+    if (!map) throw ApiError.badRequest("Map not found.");
+    if (map.authorId !== user.id) throw ApiError.unauthorized("Only the palace creator can delete this map.");
+    await prisma.map.delete({ where: { id } });
+    return jsonOk({ deleted: true, id });
+  });
+}

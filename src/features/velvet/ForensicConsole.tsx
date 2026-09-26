@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/forms/Button";
 import { ErrorBanner } from "@/components/feedback/ErrorBanner";
+import { OperationProgress } from "@/components/feedback/OperationProgress";
 import { MetricCard } from "@/components/analysis/MetricCard";
 import { HistogramChart } from "@/components/analysis/HistogramChart";
 import { ResultTable, type TableColumn } from "@/components/analysis/ResultTable";
@@ -21,6 +22,7 @@ import {
   fetchMapForensicPassphrases,
   restoreAudioArtifact,
   restoreImageArtifact,
+  type ExtractionProgress,
   type MediaArtifact,
   type MapSummary,
 } from "@/lib/api/client";
@@ -74,6 +76,8 @@ export function ForensicConsole() {
   const [attackRows, setAttackRows] = useState<TestResult[]>([]);
   const [attackError, setAttackError] = useState<string | null>(null);
   const [attackRunning, setAttackRunning] = useState(false);
+  const [attackProgressLabel, setAttackProgressLabel] = useState<string | null>(null);
+  const [attackProgress, setAttackProgress] = useState<ExtractionProgress | null>(null);
   const [baselineText, setBaselineText] = useState<string | null>(null);
   const [compressedFile, setCompressedFile] = useState<File | null>(null);
   const [compressedPlaybackFile, setCompressedPlaybackFile] = useState<File | null>(null);
@@ -169,6 +173,7 @@ export function ForensicConsole() {
   const [batchRows, setBatchRows] = useState<BatchAssetRow[]>([]);
   const [batchComparisonRows, setBatchComparisonRows] = useState<ExportRow[]>([]);
   const [batchRunning, setBatchRunning] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{ completed: number; total: number; label: string } | null>(null);
   const [auditMapId, setAuditMapId] = useState("");
   const [auditClues, setAuditClues] = useState<Awaited<ReturnType<typeof fetchMap>>["clues"]>([]);
   const [auditSource, setAuditSource] = useState<"map" | "upload">("map");
@@ -295,18 +300,22 @@ export function ForensicConsole() {
   const checkBaseline = async () => {
     if (!attackFile) return;
     setAttackRunning(true);
+    setAttackProgressLabel("Decrypting original asset and checking passphrase…");
+    setAttackProgress({ completed: 0, total: 2, label: "Preparing media decryption…" });
     setAttackError(null);
     attackStartedAt.current = performance.now();
     try {
       const baseline = isImageAttack
-        ? await extractImage(attackFile, attackPass)
-        : await extractAudio(attackFile, attackPass);
+        ? await extractImage(attackFile, attackPass, setAttackProgress)
+        : await extractAudio(attackFile, attackPass, setAttackProgress);
       setBaselineText(baseline.text);
     } catch (err) {
       setBaselineText(null);
       setAttackError(err instanceof Error ? err.message : "Original media could not be decrypted.");
     } finally {
       setAttackRunning(false);
+      setAttackProgressLabel(null);
+      setAttackProgress(null);
     }
   };
 
@@ -365,11 +374,13 @@ export function ForensicConsole() {
   const decryptRestored = async () => {
     if (!restoredFile || !attackFile) return;
     setAttackRunning(true);
+    setAttackProgressLabel("Decrypting restored asset and checking passphrase…");
+    setAttackProgress({ completed: 0, total: 2, label: "Preparing media decryption…" });
     setAttackError(null);
     try {
       const result = isImageAttack
-        ? await extractImage(restoredFile, attackPass)
-        : await extractAudio(restoredFile, attackPass);
+        ? await extractImage(restoredFile, attackPass, setAttackProgress)
+        : await extractAudio(restoredFile, attackPass, setAttackProgress);
       setFinalText(result.text);
       setAttackRows((previous) => [...previous, {
         runId: crypto.randomUUID(),
@@ -395,6 +406,8 @@ export function ForensicConsole() {
       }]);
     } finally {
       setAttackRunning(false);
+      setAttackProgressLabel(null);
+      setAttackProgress(null);
     }
   };
 
@@ -493,7 +506,11 @@ export function ForensicConsole() {
       ? sourceClues.map((clue) => ({ id: clue.id, media: clue.mediaType === "IMAGE" ? "image" as const : "audio" as const, passphrase: batchPassphrases[clue.id] ?? clue.passphrase ?? "", filename: `clue-${clue.nodeOrder + 1}`, file: undefined as File | undefined, clue }))
       : auditUploads.map((file, index) => ({ id: `${file.name}:${file.size}:${index}`, media: file.type === "image/png" ? "image" as const : "audio" as const, passphrase: batchPassphrases[`${file.name}:${file.size}:${index}`] ?? "", filename: file.name, file, clue: null }));
     if (selected.length === 0) return;
+    const totalSteps = selected.reduce((total, asset) => total + (asset.media === "image" ? IMAGE_FORMATS.length : AUDIO_FORMATS.length), 0);
+    let completedSteps = 0;
+    const updateProgress = (label: string) => setBatchProgress({ completed: completedSteps, total: totalSteps, label });
     setBatchRunning(true);
+    setBatchProgress({ completed: 0, total: totalSteps, label: "Preparing palace audit…" });
     setBatchRows([]);
     setBatchComparisonRows([]);
     const rows: BatchAssetRow[] = [];
@@ -525,10 +542,12 @@ export function ForensicConsole() {
       referenceFilename: args.right.name,
       mediaMeta: args.test === "baseline" ? "Uncompressed baseline" : `${args.test.toUpperCase()} restored output · extraction ${args.status}`,
     });
-    for (const asset of selected) {
+    for (let assetIndex = 0; assetIndex < selected.length; assetIndex += 1) {
+      const asset = selected[assetIndex];
       const media = asset.media;
       let file: File;
       let coverFile: File | null = null;
+      updateProgress(`Loading asset ${assetIndex + 1} of ${selected.length}…`);
       try {
         if (asset.file) file = asset.file;
         else {
@@ -542,10 +561,13 @@ export function ForensicConsole() {
         }
       } catch (error) {
         rows.push({ filename: asset.filename, media, format: "unavailable", parameter: 0, result: null, status: "ERROR", error: error instanceof Error ? error.message : "Asset unavailable" });
+        completedSteps += media === "image" ? IMAGE_FORMATS.length : AUDIO_FORMATS.length;
+        updateProgress(`Skipping unavailable asset ${assetIndex + 1} of ${selected.length}.`);
         continue;
       }
       if (coverFile) {
         try {
+          updateProgress(`Comparing original files for asset ${assetIndex + 1} of ${selected.length}…`);
           const baseline = media === "image" ? await analyzeImage(coverFile, file) : await analyzeAudio(coverFile, file);
           addComparison({ media, test: "baseline", parameter: null, left: coverFile, right: file, metrics: baseline.metrics, status: "NOT_RUN", comparison: "Raw cover vs original stego" });
         } catch {
@@ -553,6 +575,7 @@ export function ForensicConsole() {
         }
       }
       for (const parameter of media === "image" ? IMAGE_FORMATS : AUDIO_FORMATS) {
+        updateProgress(`Decrypting, compressing, restoring, and comparing ${parameter.toUpperCase()}…`);
         try {
           const result = media === "image"
             ? await compressImage(file, asset.passphrase, parameter as ImageFormat)
@@ -576,10 +599,13 @@ export function ForensicConsole() {
         } catch (error) {
           rows.push({ filename: file.name, media, format: parameter, parameter: resultParameter(parameter), result: null, status: "ERROR", error: error instanceof Error ? error.message : "Attack failed" });
         }
+        completedSteps += 1;
+        updateProgress(`Finished ${parameter.toUpperCase()} for asset ${assetIndex + 1} of ${selected.length}.`);
       }
     }
     setBatchRows(rows);
     setBatchComparisonRows(comparisons);
+    setBatchProgress({ completed: totalSteps, total: totalSteps, label: "Audit complete." });
     setBatchRunning(false);
   };
 
@@ -707,6 +733,7 @@ export function ForensicConsole() {
           <StageStep number="1" title="Check original decryption">
             <p className="mb-2 text-[12px] text-muted">Check the unmodified file first to establish the baseline.</p>
             <Button disabled={!attackFile || attackRunning} onClick={checkBaseline}>{attackRunning ? "Checking…" : "Decrypt original"}</Button>
+            {attackProgressLabel ? <OperationProgress label={attackProgress?.label ?? attackProgressLabel} value={((attackProgress?.completed ?? 0) / (attackProgress?.total || 2)) * 100} /> : null}
             {baselineText !== null ? <p className="mt-3 rounded-control border border-success/30 bg-success/5 p-3 text-[12px] text-success">Baseline: PASS · {baselineText}</p> : null}
           </StageStep>
           <StageStep number="2" title={`Compress to ${attackFormat.toUpperCase()}`}>
@@ -727,6 +754,7 @@ export function ForensicConsole() {
           </StageStep>
           <StageStep number="4" title="Decrypt restored file">
             <Button disabled={!restoredFile || attackRunning} onClick={decryptRestored}>{attackRunning ? "Decrypting…" : "Decrypt restored media"}</Button>
+            {attackProgressLabel ? <OperationProgress label={attackProgress?.label ?? attackProgressLabel} value={((attackProgress?.completed ?? 0) / (attackProgress?.total || 2)) * 100} /> : null}
             {finalText ? <p className="mt-3 rounded-control border border-success/30 bg-success/5 p-3 text-[12px] text-success">Extraction: PASS · {finalText}</p> : null}
             {attackRows.length > 0 ? <div className="mt-3 flex flex-wrap gap-3"><Button variant="secondary" onClick={exportAttack}>Export XLSX report</Button>{restoredFile ? <a href={restoredPreview} download={restoredFile.name} className="inline-flex min-h-[44px] items-center rounded-control border border-line px-4 text-[12px] text-ink">Download restored file</a> : null}</div> : null}
           </StageStep>
@@ -879,6 +907,10 @@ export function ForensicConsole() {
             Export Combined Forensic XLSX Report
           </Button>
         </div>
+        {batchProgress ? <OperationProgress
+          label={batchProgress.label}
+          value={batchProgress.total ? (batchProgress.completed / batchProgress.total) * 100 : 0}
+        /> : null}
         {batchRows.length > 0 ? (
           <div className="mt-3">
             <ResultTable

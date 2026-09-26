@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/forms/Button";
 import { ErrorBanner } from "@/components/feedback/ErrorBanner";
-import { publishMap, type ClueInput } from "@/lib/api/client";
+import { OperationProgress } from "@/components/feedback/OperationProgress";
+import { publishMap, type ClueInput, type PublishProgress } from "@/lib/api/client";
 import { inspectAudio, inspectImage } from "@/lib/api/client";
 import { navigateWithTransition } from "@/lib/navigation";
 import type { PngInfo, WavInfo } from "@/lib/contracts/types";
@@ -63,6 +64,7 @@ export function PalaceBuilder() {
   const [selectedClue, setSelectedClue] = useState<number | null>(0);
   const [entryBriefing, setEntryBriefing] = useState(firstTemplate.entryBriefing);
   const [publishing, setPublishing] = useState(false);
+  const [publishingProgress, setPublishingProgress] = useState<PublishProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const wallSet = useMemo(() => wallSetFromCoordinates(walls), [walls]);
   const clue = selectedClue === null ? null : clues[selectedClue] ?? null;
@@ -199,6 +201,7 @@ export function PalaceBuilder() {
     }
 
     setPublishing(true);
+    setPublishingProgress(null);
     setError(null);
     try {
       const clueInputs: ClueInput[] = clues.map((item, index) => ({
@@ -223,12 +226,13 @@ export function PalaceBuilder() {
         treasureY: treasure.y,
         shadows,
         clues: clueInputs,
-      });
+      }, setPublishingProgress);
       navigateWithTransition("/maps");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Publish failed.");
     } finally {
       setPublishing(false);
+      setPublishingProgress(null);
     }
   }
 
@@ -367,6 +371,16 @@ export function PalaceBuilder() {
           <Button disabled={publishing} onClick={publish} className="w-full justify-center py-4">
             {publishing ? "Hiding payloads…" : "Save Palace Map"}
           </Button>
+          {publishingProgress ? <OperationProgress
+            label={publishingProgress.phase === "encrypting"
+              ? `Encrypting clue ${publishingProgress.clueNumber ?? Math.min(publishingProgress.completed + 1, publishingProgress.total)} of ${publishingProgress.total}…`
+              : publishingProgress.phase === "saving"
+                ? "Saving encrypted palace…"
+                : "Encryption complete. Opening lobby…"}
+            value={publishingProgress.phase === "encrypting"
+              ? (publishingProgress.completed / Math.max(1, publishingProgress.total)) * 100
+              : 100}
+          /> : null}
         </aside>
       </div>
     </div>

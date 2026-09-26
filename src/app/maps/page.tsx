@@ -28,6 +28,7 @@ export default async function MapsPage() {
     id: map.id,
     title: map.title,
     authorName: map.authorName,
+    isAuthor: map.authorId === user.id,
     gridSize: map.gridSize,
     clueCount: map.clueNodes.length,
     solved: map.clueNodes.filter((clue) => clue._count.solves > 0).length,

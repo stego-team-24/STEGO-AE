@@ -5,7 +5,8 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { Button } from "@/components/forms/Button";
 import { ErrorBanner } from "@/components/feedback/ErrorBanner";
-import { extractClue, fetchMap, type MapDetail } from "@/lib/api/client";
+import { OperationProgress } from "@/components/feedback/OperationProgress";
+import { extractClue, fetchMap, type ExtractionProgress, type MapDetail } from "@/lib/api/client";
 import { columnLabel, getLegacyTemplateWalls, getTemplate, TEMPLATES, wallSetFromCoordinates } from "@/lib/templates";
 import { AudioPreview, ImagePreview } from "@/components/media/MediaPreview";
 
@@ -64,6 +65,7 @@ export function Infiltration({ mapId }: { mapId: string }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [player, setPlayer] = useState<Pos>({ x: 0, y: 0 });
   const [visited, setVisited] = useState<Set<string>>(new Set());
+  const [knownShadows, setKnownShadows] = useState<Set<string>>(new Set());
   const [hp, setHp] = useState(3);
   const [caughtCount, setCaughtCount] = useState(0);
   const [solved, setSolved] = useState<number[]>([]);
@@ -83,6 +85,7 @@ export function Infiltration({ mapId }: { mapId: string }) {
   const [wrongAttempts, setWrongAttempts] = useState(0);
   const [revealed, setRevealed] = useState(false);
   const [extracting, setExtracting] = useState(false);
+  const [extractionProgress, setExtractionProgress] = useState<ExtractionProgress | null>(null);
   const [totalWrong, setTotalWrong] = useState(0);
   const [entryBriefingOpen, setEntryBriefingOpen] = useState(false);
   const [entryBriefingVisible, setEntryBriefingVisible] = useState(false);
@@ -117,6 +120,23 @@ export function Infiltration({ mapId }: { mapId: string }) {
   });
 
   useEffect(() => {
+    if (!map) return;
+    if (alarm) {
+      setKnownShadows(new Set(enemies.map((enemy) => `${enemy.x},${enemy.y}`)));
+      return;
+    }
+    const currentVision = new Set(visionTiles(player.x, player.y, map.gridSize));
+    setKnownShadows((previous) => {
+      const next = new Set([...previous].filter((tile) => !currentVision.has(tile)));
+      for (const enemy of enemies) {
+        const key = `${enemy.x},${enemy.y}`;
+        if (currentVision.has(key)) next.add(key);
+      }
+      return next;
+    });
+  }, [map, player.x, player.y, enemies, alarm]);
+
+  useEffect(() => {
     if (!map || entryBriefingOpen || palaceReveal || modalClue !== null || victory || failed) return;
     const frame = window.requestAnimationFrame(() => {
       const tile = playerTileRef.current;
@@ -142,6 +162,7 @@ export function Infiltration({ mapId }: { mapId: string }) {
       .then((loaded) => {
         if (cancelled) return;
         setMap(loaded);
+        setKnownShadows(new Set());
         const solvedIndices = loaded.clues.flatMap((clue, index) => loaded.solvedClueIds.includes(clue.id) ? [index] : []);
         setSolved(solvedIndices);
         setSolvedMessages(Object.fromEntries(loaded.clues.flatMap((clue, index) => loaded.solvedMessages[clue.id] ? [[index, loaded.solvedMessages[clue.id]]] : [])));
@@ -359,10 +380,11 @@ export function Infiltration({ mapId }: { mapId: string }) {
   const submitPassphrase = async () => {
     if (modalClue === null || extracting) return;
     setExtracting(true);
+    setExtractionProgress({ completed: 0, total: 3, label: "Preparing clue decryption…" });
     setModalError(null);
     try {
       const clue = clues[modalClue];
-      const result = await extractClue(clue.id, modalPass);
+      const result = await extractClue(clue.id, modalPass, setExtractionProgress);
       setModalText(result.text);
       setSolvedMessages((previous) => ({ ...previous, [modalClue]: result.text }));
       setSolved((previous) => previous.includes(modalClue) ? previous : [...previous, modalClue]);
@@ -378,6 +400,7 @@ export function Infiltration({ mapId }: { mapId: string }) {
       }
     } finally {
       setExtracting(false);
+      setExtractionProgress(null);
     }
   };
 
@@ -493,6 +516,7 @@ export function Infiltration({ mapId }: { mapId: string }) {
                 walls={walls}
                 player={player}
                 visited={visited}
+                knownShadows={knownShadows}
                 visible={visibleSet}
                 map={map}
                 clues={clues}
@@ -586,6 +610,7 @@ export function Infiltration({ mapId }: { mapId: string }) {
           wrongAttempts={wrongAttempts}
           revealed={revealed}
           extracting={extracting}
+          extractionProgress={extractionProgress}
           onClose={() => setModalClue(null)}
           onSubmit={submitPassphrase}
           review={solved.includes(modalClue)}
@@ -614,6 +639,7 @@ function GameRow({
   walls,
   player,
   visited,
+  knownShadows,
   visible,
   map,
   clues,
@@ -632,6 +658,7 @@ function GameRow({
   walls: Set<string>;
   player: Pos;
   visited: Set<string>;
+  knownShadows: Set<string>;
   visible: Set<string>;
   map: MapDetail;
   clues: MapDetail["clues"];
@@ -654,6 +681,7 @@ function GameRow({
         const isPlayer = player.x === x && player.y === y;
         const isVisible = visible.has(key);
         const isVisited = visited.has(key);
+        const isKnownShadow = knownShadows.has(key);
         const clueIndex = clues.findIndex((c) => c.coordX === x && c.coordY === y);
         const isEntrance = map.entranceX === x && map.entranceY === y;
         const isTreasure = map.treasureX === x && map.treasureY === y;
@@ -663,8 +691,8 @@ function GameRow({
         const tileType = !canIdentifyTile ? "Unexplored tile"
           : isPlayer ? "Your position"
             : isWall ? "Wall"
-              : isEnemy && (alarm || isVisible) ? "Shadow"
-                : isTreasure && solved.length === clues.length && (isVisible || alarm) ? "Treasure"
+              : isKnownShadow ? "Shadow"
+                : isTreasure && solved.length === clues.length && (isVisited || isVisible || alarm) ? "Treasure"
                   : isEntrance ? "Entrance"
                     : clueIndex >= 0 && clueIndex < unlockedClueCount ? `Clue ${clueIndex + 1}`
                       : "Floor";
@@ -675,9 +703,10 @@ function GameRow({
         else if (!isVisible && !isVisited) cell = "bg-[#050509] border-[#050509]";
         else if (isWall) cell = "bg-[#080810] border-line/30";
         else if (isEnemy && (alarm || isVisible)) { content = "●"; cell = "border-error bg-error/20 text-error"; }
-        else if (isTreasure && solved.length === clues.length && (isVisible || alarm)) { content = "◇"; cell = "border-accent bg-accent/40 text-accent"; }
-        else if (isEntrance && (isVisible || alarm)) { content = "▶"; cell = "border-success/50 bg-success/10 text-success"; }
-        else if (clueIndex >= 0 && clueIndex < unlockedClueCount && (isVisible || alarm)) {
+        else if (isKnownShadow && isVisited) { content = "●"; cell = "border-error/20 bg-error/5 text-error/45"; }
+        else if (isTreasure && solved.length === clues.length && (isVisited || isVisible || alarm)) { content = "◇"; cell = "border-accent bg-accent/40 text-accent"; }
+        else if (isEntrance && (isVisited || isVisible || alarm)) { content = "▶"; cell = "border-success/50 bg-success/10 text-success"; }
+        else if (clueIndex >= 0 && clueIndex < unlockedClueCount && (isVisited || isVisible || alarm)) {
           content = solved.includes(clueIndex) ? "✓" : String(clueIndex + 1);
           cell = solved.includes(clueIndex) ? "border-success/40 bg-success/10 text-success" : "border-sky-400/50 bg-sky-400/15 text-sky-300";
         } else if (isVisible) cell = "bg-[#19192b] border-line";
@@ -703,6 +732,7 @@ function ClueModal({
   wrongAttempts,
   revealed,
   extracting,
+  extractionProgress,
   onClose,
   onSubmit,
   review,
@@ -716,6 +746,7 @@ function ClueModal({
   wrongAttempts: number;
   revealed: boolean;
   extracting: boolean;
+  extractionProgress: ExtractionProgress | null;
   onClose: () => void;
   onSubmit: () => void;
   review: boolean;
@@ -752,6 +783,10 @@ function ClueModal({
             {error ? <div className="mt-3"><ErrorBanner message={error} /></div> : null}
             <p className="mt-2 text-[12px] text-muted">Attempts: {wrongAttempts}/5 {revealed ? "— hint revealed, you can keep trying" : ""}</p>
             <div className="mt-4"><Button type="button" disabled={extracting} onClick={onSubmit}>{extracting ? "Extracting…" : "Extract message"}</Button></div>
+            {extracting ? <OperationProgress
+              label={extractionProgress?.label ?? "Preparing clue decryption…"}
+              value={((extractionProgress?.completed ?? 0) / (extractionProgress?.total || 3)) * 100}
+            /> : null}
           </>
         ) : (
           <>
