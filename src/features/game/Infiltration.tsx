@@ -84,6 +84,11 @@ export function Infiltration({ mapId }: { mapId: string }) {
   const [extracting, setExtracting] = useState(false);
   const [totalWrong, setTotalWrong] = useState(0);
   const [entryBriefingOpen, setEntryBriefingOpen] = useState(false);
+  const [savedRank, setSavedRank] = useState<string | null>(null);
+  const [savedScore, setSavedScore] = useState<number | null>(null);
+  const [resultError, setResultError] = useState<string | null>(null);
+  const completionSent = useRef(false);
+  const runId = useRef<string | null>(null);
   const [movementNotice, setMovementNotice] = useState("");
   const [shadowHitAnimating, setShadowHitAnimating] = useState(false);
   const lastShadowHitRef = useRef(0);
@@ -112,6 +117,9 @@ export function Infiltration({ mapId }: { mapId: string }) {
       .then((loaded) => {
         if (cancelled) return;
         setMap(loaded);
+        const solvedIndices = loaded.clues.flatMap((clue, index) => loaded.solvedClueIds.includes(clue.id) ? [index] : []);
+        setSolved(solvedIndices);
+        setSolvedMessages(Object.fromEntries(loaded.clues.flatMap((clue, index) => loaded.solvedMessages[clue.id] ? [[index, loaded.solvedMessages[clue.id]]] : [])));
         setPlayer({ x: loaded.entranceX, y: loaded.entranceY });
         setVisited(new Set(visionTiles(loaded.entranceX, loaded.entranceY, loaded.gridSize)));
         setEnemies(loaded.shadows.map((shadow) => ({ x: shadow.x, y: shadow.y })));
@@ -124,6 +132,21 @@ export function Infiltration({ mapId }: { mapId: string }) {
       cancelled = true;
     };
   }, [mapId]);
+
+  useEffect(() => {
+    if (!victory || !map || completionSent.current) return;
+    completionSent.current = true;
+    runId.current ??= crypto.randomUUID();
+    fetch(`/api/maps/${map.id}/complete`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ runId: runId.current, elapsedSeconds: elapsed, wrongPassphrases: totalWrong, detections: caughtCount }),
+    }).then(async (response) => {
+      const data = await response.json() as { score?: number; rank?: string; error?: { message?: string } };
+      if (!response.ok) throw new Error(data.error?.message ?? "Could not save this run.");
+      setSavedRank(data.rank ?? null);
+      setSavedScore(data.score ?? null);
+    }).catch((error: unknown) => setResultError(error instanceof Error ? error.message : "Could not save this run."));
+  }, [victory, map, elapsed, totalWrong, caughtCount]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -316,7 +339,7 @@ export function Infiltration({ mapId }: { mapId: string }) {
       setTotalWrong((total) => total + 1);
       if (nextWrong >= 5) {
         setRevealed(true);
-        setModalError(`Hint: the correct passphrase is "${clues[modalClue].passphrase}".`);
+        setModalError("You can keep trying. Recheck the briefing and the clue details.");
       } else {
         setModalError("That passphrase did not unlock this clue. Check it and try again.");
       }
@@ -351,6 +374,8 @@ export function Infiltration({ mapId }: { mapId: string }) {
           <Stat label="Wrong passphrases" value={String(totalWrong)} />
           <Stat label="Times caught" value={String(caughtCount)} />
         </div>
+        <div className="result-rank"><span>PALACE RANK</span><strong>{savedRank ?? "…"}</strong><small>{savedScore === null ? "Saving your result…" : `${savedScore} / 100 points`}</small></div>
+        {resultError ? <p role="alert" className="auth-error">{resultError}</p> : null}
         <p className="mt-5 font-mono text-[13px] text-muted">
           Mean PSNR of the palace media: {avgPsnr.toFixed(2)} dB
         </p>
@@ -660,14 +685,14 @@ function ClueModal({
         {text === null ? (
           <>
             <label htmlFor="clue-pass" className="text-[13px] text-muted">Passphrase</label>
-            <p className="mt-2 text-[12px] text-muted">Enter the passphrase used to protect this clue’s message.</p>
+            <p className="mt-2 text-[12px] text-muted">Enter this clue’s passphrase, or leave it blank if no key was set.</p>
             <div className="mt-2 flex gap-2">
-              <input id={`clue-pass-${clue.id}`} type="text" value={passphrase} onChange={(event) => setPassphrase(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); if (passphrase.length > 0 && !extracting) onSubmit(); } }} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoFocus className={`min-w-0 flex-1 rounded-control border border-line bg-canvas px-4 py-3 text-ink ${showPassphrase ? "" : "passphrase-masked"}`} />
+              <input id={`clue-pass-${clue.id}`} type="text" value={passphrase} onChange={(event) => setPassphrase(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); if (!extracting) onSubmit(); } }} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoFocus className={`min-w-0 flex-1 rounded-control border border-line bg-canvas px-4 py-3 text-ink ${showPassphrase ? "" : "passphrase-masked"}`} />
               <button type="button" onClick={() => setShowPassphrase((value) => !value)} className="rounded-control border border-line px-3 text-[12px] text-muted">{showPassphrase ? "Hide" : "Show"}</button>
             </div>
             {error ? <div className="mt-3"><ErrorBanner message={error} /></div> : null}
             <p className="mt-2 text-[12px] text-muted">Attempts: {wrongAttempts}/5 {revealed ? "— hint revealed, you can keep trying" : ""}</p>
-            <div className="mt-4"><Button type="button" disabled={passphrase.length === 0 || extracting} onClick={onSubmit}>{extracting ? "Extracting…" : "Extract message"}</Button></div>
+            <div className="mt-4"><Button type="button" disabled={extracting} onClick={onSubmit}>{extracting ? "Extracting…" : "Extract message"}</Button></div>
           </>
         ) : (
           <>

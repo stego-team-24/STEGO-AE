@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { ApiError } from "@/lib/contracts/errors";
 import { jsonOk, runHandler } from "@/lib/api/http";
 import { BLANK_TEMPLATE_ID, getLegacyTemplateWalls, getTemplate, TEMPLATES } from "@/lib/templates";
+import { requireUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,6 +12,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   return runHandler(async () => {
+    const user = await requireUser();
     const { id } = await params;
     const map = await prisma.map.findUnique({
       where: { id },
@@ -19,6 +21,9 @@ export async function GET(
     if (!map) {
       throw ApiError.badRequest("Map not found.");
     }
+    const solves = await prisma.clueSolve.findMany({ where: { userId: user.id, clue: { mapId: map.id } }, select: { clueId: true, extractedText: true } });
+    const solveByClue = new Map(solves.map((solve) => [solve.clueId, solve.extractedText]));
+    const isAuthor = map.authorId === user.id;
 
     const storedWalls = Array.isArray(map.walls) ? map.walls as [number, number][] : [];
     const legacyTemplate = getTemplate(map.templateId, map.gridSize);
@@ -49,6 +54,8 @@ export async function GET(
       treasureY: map.treasureY,
       shadows: map.shadows,
       createdAt: map.createdAt,
+      solvedMessages: Object.fromEntries(solveByClue),
+      solvedClueIds: solves.map(({ clueId }) => clueId),
       clues: map.clueNodes.map((clue) => ({
         id: clue.id,
         nodeOrder: clue.nodeOrder,
@@ -57,8 +64,7 @@ export async function GET(
         mediaType: clue.mediaType,
         mediaUrl: `/api/clues/${clue.id}/media`,
         coverMediaUrl: `/api/clues/${clue.id}/media?source=cover`,
-        passphrase: clue.passphrase,
-        secretOutput: clue.secretOutput,
+        ...(isAuthor ? { passphrase: clue.passphrase } : {}),
         psnrDb: clue.psnrDb,
         mse: clue.mse,
       })),

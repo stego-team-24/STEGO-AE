@@ -3,7 +3,7 @@
 *Stay Gold After Encryption — Interactive Steganographic Labyrinth Puzzle Engine.*
 
 A full-stack Next.js game that wraps encrypted steganography (AES-256-GCM +
-keyed LSB) in a 15×15 labyrinth puzzle. UTS demo for Information Security,
+keyed LSB) in a 15×15 labyrinth puzzle. An interactive Information Security project,
 Universitas Siliwangi.
 
 - Build a 15×15 palace in the **Palace Architect**: place an entrance, treasure,
@@ -28,7 +28,7 @@ sharp · wavefile · libflac.js · ExcelJS · Vitest.
 ## Getting started
 
 ```bash
-cp .env.example .env      # then set DATABASE_URL
+cp .env.example .env      # set DATABASE_URL and AUTH_SECRET (generate with: node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))")
 npm install               # runs `prisma generate` via postinstall
 npm run db:push           # create the tables (Prisma)
 npm run dev
@@ -67,7 +67,7 @@ For a local NixOS PostgreSQL over the Unix socket, use:
 
 ## Pages
 
-- `/login` — visual auth gate (bypass enabled) → Palace Lobby.
+- `/login` — account sign-in and registration → Palace Lobby.
 - `/maps` — list of palaces; infiltrate or create a new one.
 - `/builder` — Palace Architect: 15×15 grid, template, nodes, publish.
 - `/play/[id]` — Phantom Infiltration: fog of war, clues, alarm chase, victory.

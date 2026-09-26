@@ -13,6 +13,7 @@ export const ERROR_STATUS = {
   CAPACITY_EXCEEDED: 422,
   MEDIA_MISMATCH: 422,
   EXTRACTION_FAILED: 422,
+  UNAUTHENTICATED: 401,
   INTERNAL: 500,
 } as const;
 
@@ -63,6 +64,10 @@ export class ApiError extends Error {
 
   static extractionFailed() {
     return new ApiError("EXTRACTION_FAILED", EXTRACTION_FAILED_MESSAGE);
+  }
+
+  static unauthorized(message = "Sign in to continue.") {
+    return new ApiError("UNAUTHENTICATED", message);
   }
 
   static internal(message = "Internal error.") {

@@ -108,7 +108,7 @@ export function ForensicConsole() {
       const extension = clue.mediaType === "IMAGE" ? "png" : "wav";
       setAttackFile(new File([blob], `clue-${clue.nodeOrder + 1}.${extension}`, { type: clue.mediaType === "IMAGE" ? "image/png" : "audio/wav" }));
       setAttackFormat(clue.mediaType === "IMAGE" ? "jpeg" : "flac");
-      setAttackPass(clue.passphrase);
+      setAttackPass(clue.passphrase ?? "");
       setBaselineText(null);
       setCompressedFile(null);
       setRestoredFile(null);
@@ -203,7 +203,7 @@ export function ForensicConsole() {
   }, [restoredFile]);
 
   const checkBaseline = async () => {
-    if (!attackFile || attackPass.length < 12) return;
+    if (!attackFile) return;
     setAttackRunning(true);
     setAttackError(null);
     attackStartedAt.current = performance.now();
@@ -375,9 +375,9 @@ export function ForensicConsole() {
   const runBatch = async () => {
     const sourceClues = auditSource === "map" ? auditClues.filter((clue) => batchAssetIds.includes(clue.id)) : [];
     const selected = auditSource === "map"
-      ? sourceClues.map((clue) => ({ id: clue.id, media: clue.mediaType === "IMAGE" ? "image" as const : "audio" as const, passphrase: batchPassphrases[clue.id] ?? clue.passphrase, filename: `clue-${clue.nodeOrder + 1}`, file: undefined as File | undefined, clue }))
+      ? sourceClues.map((clue) => ({ id: clue.id, media: clue.mediaType === "IMAGE" ? "image" as const : "audio" as const, passphrase: batchPassphrases[clue.id] ?? clue.passphrase ?? "", filename: `clue-${clue.nodeOrder + 1}`, file: undefined as File | undefined, clue }))
       : auditUploads.map((file, index) => ({ id: `${file.name}:${file.size}:${index}`, media: file.type === "image/png" ? "image" as const : "audio" as const, passphrase: batchPassphrases[`${file.name}:${file.size}:${index}`] ?? "", filename: file.name, file, clue: null }));
-    if (selected.length === 0 || selected.some((asset) => asset.passphrase.length < 12)) return;
+    if (selected.length === 0) return;
     setBatchRunning(true);
     setBatchRows([]);
     setBatchComparisonRows([]);
@@ -473,7 +473,7 @@ export function ForensicConsole() {
       media: isImageAttack ? "image" : "audio",
       test: attackFormat,
       buildVersion: "0.1.0",
-      environment: "demo",
+      environment: "local",
       comparisonSource: `stego tested after ${attackFormat.toUpperCase()} compression and restoration`,
       parameters: { format: attackFormat, setting: resultParameter(attackFormat), passphrase: null },
       rows: attackRows.map((row) => ({
@@ -515,7 +515,7 @@ export function ForensicConsole() {
       media: "mixed",
       test: "mixed",
       buildVersion: "0.1.0",
-      environment: "demo",
+      environment: "local",
       comparisonSource: "all selected palace media tested with their supported compression formats, followed by extraction",
       parameters: { auditedAssets: new Set(batchRows.map((row) => row.filename)).size, resultRows: rows.length, formats: formats.join(", ") },
       rows,
@@ -582,7 +582,7 @@ export function ForensicConsole() {
               }}
             />
           </label>
-          <div className="flex gap-2"><input type={attackShowPass ? "text" : "password"} value={attackPass} onChange={(event) => setAttackPass(event.target.value)} placeholder="Passphrase (12+ chars)" className="min-w-0 flex-1 rounded-control border border-line bg-canvas px-4 py-3 text-ink placeholder:text-muted" /><button type="button" onClick={() => setAttackShowPass((show) => !show)} className="rounded-control border border-line px-3 text-[12px] text-muted">{attackShowPass ? "Hide" : "Show"}</button></div>
+          <div className="flex gap-2"><input type={attackShowPass ? "text" : "password"} value={attackPass} onChange={(event) => setAttackPass(event.target.value)} placeholder="Passphrase" className="min-w-0 flex-1 rounded-control border border-line bg-canvas px-4 py-3 text-ink placeholder:text-muted" /><button type="button" onClick={() => setAttackShowPass((show) => !show)} className="rounded-control border border-line px-3 text-[12px] text-muted">{attackShowPass ? "Hide" : "Show"}</button></div>
         </div>
 
         {attackError ? <div className="mt-3"><ErrorBanner message={attackError} /></div> : null}
@@ -590,7 +590,7 @@ export function ForensicConsole() {
         <div className="mt-4 space-y-4">
           <StageStep number="1" title="Check original decryption">
             <p className="mb-2 text-[12px] text-muted">Check the unmodified file first to establish the baseline.</p>
-            <Button disabled={!attackFile || attackPass.length < 12 || attackRunning} onClick={checkBaseline}>{attackRunning ? "Checking…" : "Decrypt original"}</Button>
+            <Button disabled={!attackFile || attackRunning} onClick={checkBaseline}>{attackRunning ? "Checking…" : "Decrypt original"}</Button>
             {baselineText !== null ? <p className="mt-3 rounded-control border border-success/30 bg-success/5 p-3 text-[12px] text-success">Baseline: PASS · {baselineText}</p> : null}
           </StageStep>
           <StageStep number="2" title={`Compress to ${attackFormat.toUpperCase()}`}>
@@ -610,7 +610,7 @@ export function ForensicConsole() {
             {restoredMetrics ? <p className="mt-2 font-mono text-[11px] text-muted">MSE {restoredMetrics.mse.toFixed(6)} · PSNR {restoredMetrics.psnrDb == null ? "∞" : `${restoredMetrics.psnrDb.toFixed(2)} dB`}{restoredPcmIdentical === null ? "" : ` · PCM identical: ${restoredPcmIdentical ? "yes" : "no"}`}</p> : null}
           </StageStep>
           <StageStep number="4" title="Decrypt restored file">
-            <Button disabled={!restoredFile || attackPass.length < 12 || attackRunning} onClick={decryptRestored}>{attackRunning ? "Decrypting…" : "Decrypt restored media"}</Button>
+            <Button disabled={!restoredFile || attackRunning} onClick={decryptRestored}>{attackRunning ? "Decrypting…" : "Decrypt restored media"}</Button>
             {finalText ? <p className="mt-3 rounded-control border border-success/30 bg-success/5 p-3 text-[12px] text-success">Extraction: PASS · {finalText}</p> : null}
             {attackRows.length > 0 ? <div className="mt-3 flex flex-wrap gap-3"><Button variant="secondary" onClick={exportAttack}>Export XLSX report</Button>{restoredFile ? <a href={restoredPreview} download={restoredFile.name} className="inline-flex min-h-[44px] items-center rounded-control border border-line px-4 text-[12px] text-ink">Download restored file</a> : null}</div> : null}
           </StageStep>
@@ -731,22 +731,22 @@ export function ForensicConsole() {
           <Button variant={auditSource === "upload" ? "primary" : "secondary"} onClick={() => setAuditSource("upload")}>Upload custom assets</Button>
         </div>
         {auditSource === "map" ? <>
-          <select value={auditMapId} onChange={(event) => { const id = event.target.value; setAuditMapId(id); setBatchAssetIds([]); setAuditClues([]); if (id) void fetchMap(id).then((detail) => { setAuditClues(detail.clues); setBatchPassphrases((prev) => Object.fromEntries([...Object.entries(prev), ...detail.clues.map((clue) => [clue.id, prev[clue.id] ?? clue.passphrase]) ])); }).catch((error) => setPairError(error instanceof Error ? error.message : "Could not load palace assets.")); }} className="mb-3 w-full rounded-control border border-line bg-canvas px-4 py-3 text-[13px] text-ink">
+          <select value={auditMapId} onChange={(event) => { const id = event.target.value; setAuditMapId(id); setBatchAssetIds([]); setAuditClues([]); if (id) void fetchMap(id).then((detail) => { setAuditClues(detail.clues); setBatchPassphrases((prev) => Object.fromEntries([...Object.entries(prev), ...detail.clues.map((clue) => [clue.id, prev[clue.id] ?? clue.passphrase ?? ""]) ])); }).catch((error) => setPairError(error instanceof Error ? error.message : "Could not load palace assets.")); }} className="mb-3 w-full rounded-control border border-line bg-canvas px-4 py-3 text-[13px] text-ink">
             <option value="">Choose palace to audit…</option>{maps.map((map) => <option key={map.id} value={map.id}>{map.title} · {map.clueCount} assets</option>)}
           </select>
         </> : <label className="mb-3 inline-flex min-h-[44px] cursor-pointer items-center rounded-control border border-line px-4 text-[13px] hover:bg-raised">{auditUploads.length ? `${auditUploads.length} custom file(s) selected` : "Choose stego PNG or WAV files"}<input type="file" multiple accept="image/png,audio/wav" className="hidden" onChange={(event) => { setAuditUploads(Array.from(event.target.files ?? [])); setBatchPassphrases({}); setBatchAssetIds([]); event.target.value = ""; }} /></label>}
         <div className="space-y-3">
-          {(auditSource === "map" ? auditClues.map((clue, index) => ({ id: clue.id, name: `Clue ${index + 1} · ${clue.mediaType}`, pass: batchPassphrases[clue.id] ?? clue.passphrase })) : auditUploads.map((file, index) => ({ id: `${file.name}:${file.size}:${index}`, name: `${file.name} · ${file.type.includes("image") ? "IMAGE" : "AUDIO"}`, pass: batchPassphrases[`${file.name}:${file.size}:${index}`] ?? "" }))).map((asset, index) => (
+          {(auditSource === "map" ? auditClues.map((clue, index) => ({ id: clue.id, name: `Clue ${index + 1} · ${clue.mediaType}`, pass: batchPassphrases[clue.id] ?? clue.passphrase ?? "" })) : auditUploads.map((file, index) => ({ id: `${file.name}:${file.size}:${index}`, name: `${file.name} · ${file.type.includes("image") ? "IMAGE" : "AUDIO"}`, pass: batchPassphrases[`${file.name}:${file.size}:${index}`] ?? "" }))).map((asset, index) => (
             <div key={asset.id} className="grid gap-2 rounded-control border border-line bg-canvas p-3 sm:grid-cols-[auto_1fr_minmax(200px,1fr)_auto] sm:items-center">
               <input type="checkbox" checked={batchAssetIds.includes(asset.id)} onChange={(event) => setBatchAssetIds((previous) => event.target.checked ? [...previous, asset.id] : previous.filter((id) => id !== asset.id))} aria-label={`Include asset ${index + 1}`} />
               <span className="font-mono text-[12px] text-ink">{asset.name}</span>
-              <input type={auditShowPass[asset.id] ? "text" : "password"} value={asset.pass} onChange={(event) => setBatchPassphrases((previous) => ({ ...previous, [asset.id]: event.target.value }))} placeholder="Passphrase (12+ chars)" className="rounded-control border border-line bg-surface px-3 py-2 text-[12px] text-ink" />
+              <input type={auditShowPass[asset.id] ? "text" : "password"} value={asset.pass} onChange={(event) => setBatchPassphrases((previous) => ({ ...previous, [asset.id]: event.target.value }))} placeholder="Passphrase" className="rounded-control border border-line bg-surface px-3 py-2 text-[12px] text-ink" />
               <button type="button" onClick={() => setAuditShowPass((previous) => ({ ...previous, [asset.id]: !previous[asset.id] }))} className="text-[11px] text-muted">{auditShowPass[asset.id] ? "Hide" : "Show"}</button>
             </div>
           ))}
         </div>
         <div className="mt-3 flex gap-3">
-          <Button disabled={batchAssetIds.length === 0 || batchRunning || batchAssetIds.some((id) => (batchPassphrases[id] ?? (auditSource === "map" ? auditClues.find((clue) => clue.id === id)?.passphrase : "") ?? "").length < 12)} onClick={runBatch}>
+          <Button disabled={batchAssetIds.length === 0 || batchRunning} onClick={runBatch}>
             {batchRunning ? "Testing compression formats…" : "Run Full Asset Audit"}
           </Button>
           <Button variant="secondary" disabled={batchRows.length === 0} onClick={exportBatch}>
@@ -795,10 +795,10 @@ function Section({
   subtitle: string;
   children: React.ReactNode;
 }) {
+  const number = title.toLowerCase().includes("manual") ? "01" : title.toLowerCase().includes("pair") ? "02" : "03";
   return (
-    <section className="rounded-card border border-line bg-surface p-5">
-      <h2 className="text-heading">{title}</h2>
-      <p className="mt-1 text-[13px] text-muted">{subtitle}</p>
+    <section className="p5-panel p5-cut-sm rounded-card p-5">
+      <div className="section-heading mt-0"><span>{number}</span><div><h2 className="p5-heading text-heading">{title}</h2><p>{subtitle}</p></div></div>
       <div className="mt-4">{children}</div>
     </section>
   );

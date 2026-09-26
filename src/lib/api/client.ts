@@ -155,6 +155,8 @@ export interface MapSummary {
   entryBriefing: string;
   createdAt: string;
   clueCount: number;
+  bestScore?: number | null;
+  bestRank?: string | null;
 }
 
 export interface ClueDetail {
@@ -165,8 +167,7 @@ export interface ClueDetail {
   mediaType: "IMAGE" | "AUDIO";
   mediaUrl: string;
   coverMediaUrl: string;
-  passphrase: string;
-  secretOutput: string;
+  passphrase?: string;
   psnrDb: number | null;
   mse: number | null;
 }
@@ -185,6 +186,8 @@ export interface MapDetail {
   treasureY: number;
   shadows: { x: number; y: number }[];
   createdAt: string;
+  solvedMessages: Record<string, string>;
+  solvedClueIds: string[];
   clues: ClueDetail[];
 }
 

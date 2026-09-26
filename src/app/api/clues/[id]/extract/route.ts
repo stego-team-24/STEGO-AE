@@ -5,6 +5,7 @@ import { decodePng } from "@/lib/media/png";
 import { decodeWav } from "@/lib/media/wav";
 import { extractImagePayload } from "@/lib/engine/extract";
 import { extractAudioPayload } from "@/lib/engine/extract";
+import { requireUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -13,6 +14,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   return runHandler(async () => {
+    const user = await requireUser();
     const { id } = await params;
     const clue = await prisma.clueNode.findUnique({ where: { id } });
     if (!clue) {
@@ -21,16 +23,19 @@ export async function POST(
 
     const body = (await request.json()) as { passphrase?: unknown };
     const passphrase = body.passphrase;
-    if (typeof passphrase !== "string" || passphrase.length === 0) {
-      throw ApiError.badRequest("Passphrase is required.", "passphrase");
+    if (typeof passphrase !== "string") {
+      throw ApiError.badRequest("Passphrase must be text.", "passphrase");
     }
 
     const mediaData = new Uint8Array(clue.mediaData);
-    if (clue.mediaType === "IMAGE") {
-      const carrier = await decodePng(mediaData);
-      return jsonOk(extractImagePayload(carrier, passphrase));
-    }
-    const carrier = decodeWav(mediaData);
-    return jsonOk(extractAudioPayload(carrier, passphrase));
+    const result = clue.mediaType === "IMAGE"
+      ? extractImagePayload(await decodePng(mediaData), passphrase)
+      : extractAudioPayload(decodeWav(mediaData), passphrase);
+    await prisma.clueSolve.upsert({
+      where: { userId_clueId: { userId: user.id, clueId: clue.id } },
+      create: { userId: user.id, clueId: clue.id, extractedText: result.text },
+      update: { extractedText: result.text },
+    });
+    return jsonOk(result);
   });
 }

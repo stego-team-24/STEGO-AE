@@ -22,7 +22,10 @@ model Map {
   shadows     Json       @default("[]")
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
+  authorId    String?
+  author      User?      @relation("MapAuthor", fields: [authorId], references: [id], onDelete: SetNull)
   clueNodes   ClueNode[]
+  gameResults GameResult[]
 }
 
 model ClueNode {
@@ -41,6 +44,49 @@ model ClueNode {
   psnrDb       Float?
   mse          Float?
   createdAt    DateTime  @default(now())
+  solves       ClueSolve[]
+}
+
+model User {
+  id           String       @id @default(uuid())
+  email        String       @unique
+  displayName  String
+  passwordHash String
+  createdAt    DateTime     @default(now())
+  maps         Map[]        @relation("MapAuthor")
+  clueSolves   ClueSolve[]
+  gameResults  GameResult[]
+}
+
+model ClueSolve {
+  id       String   @id @default(uuid())
+  userId   String
+  clueId   String
+  extractedText String
+  solvedAt DateTime @default(now())
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clue     ClueNode @relation(fields: [clueId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, clueId])
+  @@index([userId, solvedAt])
+}
+
+model GameResult {
+  id               String   @id @default(uuid())
+  runId            String   @unique
+  userId           String
+  mapId            String
+  completedAt      DateTime @default(now())
+  elapsedSeconds   Int
+  wrongPassphrases Int
+  detections       Int
+  score            Int
+  rank             String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  map              Map      @relation(fields: [mapId], references: [id], onDelete: Cascade)
+
+  @@index([userId, completedAt])
+  @@index([mapId, userId])
 }
 
 enum MediaType {

@@ -221,7 +221,7 @@ export const LIMITS = {
   maxUploadBytes: 25 * 1024 * 1024,
   minMessageBytes: 1,
   maxMessageBytes: 32_768,
-  minPassphraseChars: 12,
+  minPassphraseChars: 0,
   maxPassphraseChars: 128,
   maxImageDimension: 1920,
   maxJsonResponseBytes: 4_000_000,

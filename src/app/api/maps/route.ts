@@ -9,6 +9,7 @@ import { embedImagePayload, embedAudioPayload } from "@/lib/engine/embed";
 import { imageMetrics } from "@/lib/analysis/image";
 import { audioMetrics } from "@/lib/analysis/audio";
 import { isReachableLayout, isValidGridSize, wallSetFromCoordinates } from "@/lib/templates";
+import { requireUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -106,10 +107,9 @@ function parseClues(form: FormData, gridSize: number): ClueDescriptor[] {
     }
     if (
       typeof clue.passphrase !== "string" ||
-      clue.passphrase.length < 12 ||
       clue.passphrase.length > 128
     ) {
-      throw ApiError.badRequest(`Clue ${index}: passphrase must be 12-128 characters.`, "clues");
+      throw ApiError.badRequest(`Clue ${index}: passphrase must be at most 128 characters.`, "clues");
     }
   });
   return clues;
@@ -141,6 +141,7 @@ async function processClue(desc: ClueDescriptor, cover: File): Promise<Processed
 
 export async function POST(request: Request) {
   return runHandler(async () => {
+    const user = await requireUser();
     const form = await request.formData();
     const title = readField(form, "title");
     const authorName = readField(form, "authorName");
@@ -194,6 +195,7 @@ export async function POST(request: Request) {
       data: {
         title,
         authorName,
+        authorId: user.id,
         gridSize,
         templateId,
         walls: walls as unknown as Prisma.InputJsonValue,
@@ -228,11 +230,17 @@ export async function POST(request: Request) {
 
 export async function GET() {
   return runHandler(async () => {
+    const user = await requireUser();
     const maps = await prisma.map.findMany({
       orderBy: { createdAt: "desc" },
-      include: { _count: { select: { clueNodes: true } } },
+      include: { _count: { select: { clueNodes: true } }, gameResults: { where: { userId: user.id }, orderBy: { score: "desc" }, take: 1 } },
     });
+    const [solved, cleared] = await Promise.all([
+      prisma.clueSolve.count({ where: { userId: user.id } }),
+      prisma.gameResult.count({ where: { userId: user.id } }),
+    ]);
     return jsonOk({
+      progress: { solvedClues: solved, completedRuns: cleared },
       maps: maps.map((map) => ({
         id: map.id,
         title: map.title,
@@ -240,9 +248,10 @@ export async function GET() {
         gridSize: map.gridSize,
         templateId: map.templateId,
         walls: Array.isArray(map.walls) ? map.walls : [],
-        entryBriefing: map.entryBriefing,
         createdAt: map.createdAt,
         clueCount: map._count.clueNodes,
+        bestScore: map.gameResults[0]?.score ?? null,
+        bestRank: map.gameResults[0]?.rank ?? null,
       })),
     });
   });

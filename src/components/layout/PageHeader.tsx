@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { Badge } from "@/components/layout/Badge";
 
 interface PageHeaderProps {
   eyebrow: string;
@@ -13,11 +12,10 @@ export function PageHeader({ eyebrow, title, lead, actions }: PageHeaderProps) {
     <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
       <div className="max-w-2xl">
         <p className="text-[11px] uppercase tracking-[2px] text-accent">{eyebrow}</p>
-        <h1 className="mt-2 text-title">{title}</h1>
+        <h1 className="p5-heading mt-2 text-title">{title}</h1>
         <p className="mt-2 text-muted">{lead}</p>
         {actions ? <div className="mt-5 flex flex-wrap gap-3">{actions}</div> : null}
       </div>
-      <Badge>DEMO MODE</Badge>
     </div>
   );
 }
@@ -31,7 +29,7 @@ export function Surface({
 }) {
   return (
     <section
-      className={`rounded-card border border-line bg-surface p-6 ${className}`}
+      className={`p5-panel p5-cut-sm p-6 ${className}`}
     >
       {children}
     </section>

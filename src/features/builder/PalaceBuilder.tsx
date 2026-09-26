@@ -1,10 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/forms/Button";
 import { ErrorBanner } from "@/components/feedback/ErrorBanner";
 import { publishMap, type ClueInput } from "@/lib/api/client";
+import { inspectAudio, inspectImage } from "@/lib/api/client";
+import type { PngInfo, WavInfo } from "@/lib/contracts/types";
+import { AudioPreview, ImagePreview } from "@/components/media/MediaPreview";
 import {
   BLANK_TEMPLATE_ID,
   GRID_SIZES,
@@ -64,6 +67,12 @@ export function PalaceBuilder() {
   const [error, setError] = useState<string | null>(null);
   const wallSet = useMemo(() => wallSetFromCoordinates(walls), [walls]);
   const clue = selectedClue === null ? null : clues[selectedClue] ?? null;
+
+  useEffect(() => {
+    fetch("/api/auth/session").then((response) => response.json()).then((data: { user?: { displayName?: string } }) => {
+      if (data.user?.displayName) setAuthorName((current) => current || data.user!.displayName!);
+    }).catch(() => undefined);
+  }, []);
 
   function applyTemplate(id: string, size = gridSize) {
     const template = fromTemplate(id, size);
@@ -181,8 +190,8 @@ export function PalaceBuilder() {
     if (!entryBriefing.trim()) return setError("Add the password briefing for Clue 1.");
     for (const item of clues) {
       if (!item.message.trim()) return setError("Every clue needs a hidden message.");
-      if (item.passphrase.length < 12 || item.passphrase.length > 128)
-        return setError("Every clue passphrase must be 12–128 characters.");
+      if (item.passphrase.length > 128)
+        return setError("Clue keys must be at most 128 characters.");
       if (!item.cover) return setError(`Choose a cover file for Clue ${clues.indexOf(item) + 1}.`);
     }
     const obstacles = wallSetFromCoordinates(walls);
@@ -372,6 +381,26 @@ function ClueEditor({ clue, index, update, remove }: {
   remove: (index: number) => void;
 }) {
   const id = `clue-${index}`;
+  const [inspection, setInspection] = useState<{ file: File; capacity: PngInfo | WavInfo | null; error?: string } | null>(null);
+  const [preview, setPreview] = useState<{ file: File; url: string } | null>(null);
+  useEffect(() => {
+    if (!clue.cover) return;
+    const file = clue.cover;
+    let active = true;
+    const reader = new FileReader();
+    reader.onload = () => { if (active && typeof reader.result === "string") setPreview({ file, url: reader.result }); };
+    reader.readAsDataURL(file);
+    const inspect = clue.mediaType === "IMAGE" ? inspectImage(file) : inspectAudio(file);
+    inspect.then((capacity) => { if (active) setInspection({ file, capacity }); })
+      .catch((error: unknown) => { if (active) setInspection({ file, capacity: null, error: error instanceof Error ? error.message : "Could not inspect this file." }); });
+    return () => { active = false; };
+  }, [clue.cover, clue.mediaType]);
+  const capacity = inspection?.file === clue.cover ? inspection.capacity : null;
+  const previewUrl = preview?.file === clue.cover ? preview.url : "";
+  const inspectionError = inspection?.file === clue.cover ? inspection.error : null;
+  const inspecting = Boolean(clue.cover && inspection?.file !== clue.cover);
+  const messageBytes = new TextEncoder().encode(clue.message).length;
+  const capacityPercent = capacity ? Math.min(100, Math.ceil(messageBytes / Math.max(1, capacity.capacityBytes) * 100)) : 0;
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between font-mono text-[10px] uppercase text-muted">
@@ -383,8 +412,8 @@ function ClueEditor({ clue, index, update, remove }: {
         <textarea id={`${id}-message`} value={clue.message} onChange={(event) => update(index, { message: event.target.value })} rows={3} className="mt-1 w-full resize-y rounded-control border border-line bg-canvas px-3 py-2 text-[12px] normal-case tracking-normal text-ink" />
       </label>
       <label htmlFor={`${id}-pass`} className="block text-[10px] uppercase tracking-[1px] text-muted">
-        Stego key · 12–128 chars
-        <input id={`${id}-pass`} type="text" value={clue.passphrase} onChange={(event) => update(index, { passphrase: event.target.value })} className="mt-1 w-full rounded-control border border-line bg-canvas px-3 py-2 font-mono text-[12px] normal-case tracking-normal text-ink" />
+        Stego key · optional · 128 chars max
+        <input id={`${id}-pass`} type="text" maxLength={128} value={clue.passphrase} onChange={(event) => update(index, { passphrase: event.target.value })} className="mt-1 w-full rounded-control border border-line bg-canvas px-3 py-2 font-mono text-[12px] normal-case tracking-normal text-ink" />
       </label>
       <select value={clue.mediaType} onChange={(event) => update(index, { mediaType: event.target.value as "IMAGE" | "AUDIO", cover: null })} className="w-full rounded-control border border-line bg-canvas px-3 py-2 text-[12px] text-ink">
         <option value="IMAGE">Cover image · PNG</option>
@@ -395,6 +424,18 @@ function ClueEditor({ clue, index, update, remove }: {
         {clue.cover ? clue.cover.name : `Drop ${clue.mediaType === "IMAGE" ? "PNG" : "WAV"} / click to browse`}
         <input type="file" accept={clue.mediaType === "IMAGE" ? "image/png" : "audio/wav"} className="sr-only" onChange={(event) => { update(index, { cover: event.target.files?.[0] ?? null }); event.target.value = ""; }} />
       </label>
+      {previewUrl ? <div className="p5-panel p5-cut-sm overflow-hidden p-3">
+        <p className="mb-2 font-mono text-[9px] uppercase tracking-[.08em] text-muted">Source media · preserved</p>
+        {clue.mediaType === "IMAGE" ? <ImagePreview src={previewUrl} alt={`Clue ${index + 1} source cover`} className="max-h-48 w-full border border-line bg-canvas object-contain" /> : <AudioPreview src={previewUrl} />}
+        <p className="mt-2 truncate font-mono text-[9px] text-muted">{clue.cover?.name} · {((clue.cover?.size ?? 0) / 1024).toFixed(1)} KB</p>
+      </div> : null}
+      {inspecting ? <p className="font-mono text-[9px] text-muted">Inspecting carrier capacity…</p> : null}
+      {inspectionError ? <p role="alert" className="text-[10px] text-error">{inspectionError}</p> : null}
+      {capacity ? <div className="p5-panel p5-cut-sm space-y-2 p-3">
+        <div className="flex items-center justify-between gap-3"><span className="font-mono text-[9px] uppercase tracking-[.06em] text-muted">Live LSB capacity</span><strong className={`font-mono text-[10px] ${capacityPercent > 100 ? "text-error" : "text-accent"}`}>{capacityPercent}% USED</strong></div>
+        <div className="capacity-track"><i className={capacityPercent > 100 ? "is-over" : ""} style={{ width: `${capacityPercent}%` }} /></div>
+        <p className="font-mono text-[9px] text-muted">{messageBytes} message bytes · {capacity.capacityBytes} maximum · {"width" in capacity ? `${capacity.width}×${capacity.height} PNG` : `${capacity.sampleRate} Hz · ${capacity.channels} channels WAV`}</p>
+      </div> : null}
       <p className="font-mono text-[9px] uppercase text-muted">Stego payload embeds on publish after file selection.</p>
     </div>
   );
