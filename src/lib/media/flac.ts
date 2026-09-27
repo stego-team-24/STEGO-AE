@@ -56,7 +56,6 @@ export async function flacRoundTrip(
   sampleRate: number,
   channels: number,
   bitsPerSample: 16,
-  level: number,
 ): Promise<FlacRoundTripOutput> {
   const flac = await loadFlac();
 
@@ -72,7 +71,7 @@ export async function flacRoundTrip(
     sampleRate,
     channels,
     bitsPerSample,
-    compression: level,
+    compression: 5,
     verify: true,
     isOgg: false,
   });

@@ -15,7 +15,6 @@ export async function POST(request: Request) {
     const stem = (file.name.replace(/\.[^.]+$/, "") || "asset").replace(/[^a-zA-Z0-9._-]+/g, "-");
     return jsonOk({
       artifact: { name: `${format}-${stem}.${extension}`, mime, size: output.length, base64: toBase64(output) },
-      parameter: 80,
       format,
     });
   });

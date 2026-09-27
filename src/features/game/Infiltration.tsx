@@ -121,19 +121,21 @@ export function Infiltration({ mapId }: { mapId: string }) {
 
   useEffect(() => {
     if (!map) return;
-    if (alarm) {
-      setKnownShadows(new Set(enemies.map((enemy) => `${enemy.x},${enemy.y}`)));
-      return;
-    }
     const currentVision = new Set(visionTiles(player.x, player.y, map.gridSize));
-    setKnownShadows((previous) => {
-      const next = new Set([...previous].filter((tile) => !currentVision.has(tile)));
-      for (const enemy of enemies) {
-        const key = `${enemy.x},${enemy.y}`;
-        if (currentVision.has(key)) next.add(key);
-      }
-      return next;
-    });
+    const visionTimer = window.setTimeout(() => {
+      setKnownShadows((previous) => {
+        if (alarm) {
+          return new Set(enemies.map((enemy) => `${enemy.x},${enemy.y}`));
+        }
+        const next = new Set([...previous].filter((tile) => !currentVision.has(tile)));
+        for (const enemy of enemies) {
+          const key = `${enemy.x},${enemy.y}`;
+          if (currentVision.has(key)) next.add(key);
+        }
+        return next;
+      });
+    }, 0);
+    return () => window.clearTimeout(visionTimer);
   }, [map, player.x, player.y, enemies, alarm]);
 
   useEffect(() => {

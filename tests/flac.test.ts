@@ -10,7 +10,7 @@ describe("FLAC lossless round-trip", () => {
       samples[i] = Math.round(Math.sin((i / 44100) * 2 * Math.PI * 440) * 12000);
     }
 
-    const { flacBytes, decoded } = await flacRoundTrip(samples, 44100, 1, 16, 5);
+    const { flacBytes, decoded } = await flacRoundTrip(samples, 44100, 1, 16);
 
     expect(flacBytes.length).toBeGreaterThan(0);
     expect(decoded).toHaveLength(n);

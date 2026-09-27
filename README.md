@@ -1,123 +1,310 @@
 # STEGO-AE — Phantom Protocol
 
-*Stay Gold After Encryption — Interactive Steganographic Labyrinth Puzzle Engine.*
+> **Stay Gold After Encryption** — An interactive steganographic labyrinth puzzle engine built as an Information Security project at Universitas Siliwangi.
 
-A full-stack Next.js game that wraps encrypted steganography (AES-256-GCM +
-keyed LSB) in a 15×15 labyrinth puzzle. An interactive Information Security project,
-Universitas Siliwangi.
+STEGO-AE is a full-stack web application that combines **authenticated encryption** (AES-256-GCM) with **Least Significant Bit (LSB) steganography** to hide secret messages inside image and audio files. Players must locate hidden messages inside media files embedded in a fog-of-war labyrinth to complete the game.
 
-- Build a 15×15 palace in the **Palace Architect**: place an entrance, treasure,
-  sequential clue nodes and shadow guards, then hide a message inside each
-  clue's PNG/WAV media.
-- Infiltrate it in **Phantom Infiltration**: explore a fog-of-war labyrinth,
-  solve clues by extracting hidden messages, trigger the alarm, and escape.
-- Audit the cryptography in the **Velvet Room**: MSE/PSNR, RGB histograms,
-  enhanced LSB, JPEG/FLAC attacks and the 15-run dataset report (XLSX).
+---
 
-## Stack
+## Features
 
-Next.js (App Router) · TypeScript · Tailwind CSS · PostgreSQL · Prisma ·
-sharp · wavefile · libflac.js · ExcelJS · Vitest.
+| Feature | Description |
+|---|---|
+| 🏰 **Palace Architect** | Build a custom labyrinth: place an entrance, treasure, clue nodes, and shadow guards. Embed a secret message into each clue's PNG/WAV media. |
+| 🎭 **Phantom Infiltration** | Explore the labyrinth under fog-of-war. Extract hidden messages from media files to unlock clues, survive guard detection, and reach the treasure. |
+| 🔬 **Velvet Room** | Forensic audit console: MSE/PSNR quality metrics, RGB histograms, LSB plane visualisation, JPEG/WebP/FLAC/MP3 compression tests, and XLSX report export. |
 
-## Requirements
+---
 
-- Node.js 24 (see `.nvmrc`)
-- npm
-- PostgreSQL (local dev) or a Railway PostgreSQL URL
+## Tech Stack
 
-## Getting started
+- **Framework**: Next.js 15 (App Router)
+- **Language**: TypeScript
+- **Styling**: Tailwind CSS
+- **Database**: PostgreSQL + Prisma ORM
+- **Crypto**: Node.js built-in `crypto` (PBKDF2, HKDF, AES-256-GCM)
+- **Media**: `sharp` (PNG/JPEG), `wavefile` (WAV), `libflac.js` (FLAC), `lamejs` (MP3)
+- **Testing**: Vitest (32 tests, 100% pass rate)
+
+---
+
+## Prerequisites
+
+Make sure the following are installed on your computer before proceeding:
+
+| Software | Version | How to check |
+|---|---|---|
+| **Node.js** | v24 or later | `node --version` |
+| **npm** | v10 or later | `npm --version` |
+| **PostgreSQL** | v14 or later | `psql --version` |
+
+> **Tip:** If you don't have Node.js v24, install [nvm](https://github.com/nvm-sh/nvm) then run `nvm install 24 && nvm use 24`.
+
+---
+
+## Installation & Running Locally
+
+### Step 1 — Clone the repository
 
 ```bash
-cp .env.example .env      # set DATABASE_URL and AUTH_SECRET (generate with: node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))")
-npm install               # runs `prisma generate` via postinstall
-npm run db:push           # create the tables (Prisma)
+git clone <repository-url>
+cd stego-ae
+```
+
+### Step 2 — Set up environment variables
+
+Copy the example file:
+
+```bash
+cp .env.example .env
+```
+
+Open `.env` and fill in the two required values:
+
+```env
+# PostgreSQL connection string
+# Format: postgresql://USER:PASSWORD@HOST:PORT/DATABASE_NAME
+DATABASE_URL="postgresql://postgres:yourpassword@localhost:5432/stego_ae"
+
+# Random 64-character hex string used to sign session cookies
+# Generate one by running the command below:
+AUTH_SECRET="paste-your-generated-secret-here"
+```
+
+**Generate a secure `AUTH_SECRET`:**
+
+```bash
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+```
+
+Copy the output and paste it as the value of `AUTH_SECRET` in your `.env` file.
+
+**Create a PostgreSQL database (if you haven't already):**
+
+```bash
+# Open PostgreSQL prompt
+psql -U postgres
+
+# Inside the prompt:
+CREATE DATABASE stego_ae;
+\q
+```
+
+### Step 3 — Install dependencies
+
+```bash
+npm install
+```
+
+> This also auto-generates the Prisma client via the `postinstall` script.
+
+### Step 4 — Create the database tables
+
+```bash
+npm run db:push
+```
+
+### Step 5 — Start the development server
+
+```bash
 npm run dev
 ```
 
-Open http://localhost:3000.
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-### NixOS
+Register a new account on the login page, then start building a palace from the Maps page.
 
-The project `flake.nix` provides Node 24 plus `prisma-engines` and sets the
-engine env vars. Enter the shell first, then create the database and push:
+---
+
+## Available Scripts
+
+| Command | Description |
+|---|---|
+| `npm run dev` | Start the development server at `http://localhost:3000` |
+| `npm run build` | Build the production bundle |
+| `npm start` | Serve the production build |
+| `npm test` | Run unit tests (Vitest) |
+| `npm run lint` | Run ESLint code quality checks |
+| `npm run typecheck` | Run TypeScript type checking |
+| `npm run db:push` | Sync Prisma schema to the PostgreSQL database |
+
+---
+
+## Application Pages
+
+| Route | Description |
+|---|---|
+| `/login` | Account sign-in and registration |
+| `/maps` | Palace lobby — list of available labyrinths |
+| `/builder` | Palace Architect — create and publish a new labyrinth |
+| `/play/[id]` | Phantom Infiltration — play a specific labyrinth |
+| `/velvet-room` | Forensic console — analyse and audit media files |
+
+---
+
+## Cryptography & Steganography
+
+All crypto is implemented using **Node.js built-in `crypto` module** only — no third-party crypto library.
+
+### Step 1 — Key Derivation
+
+A passphrase typed by the user is never used directly as a key. Instead, it is stretched and split into two separate keys:
+
+```
+Passphrase (user input)
+       │
+       ▼
+PBKDF2-SHA256 — 600,000 iterations, 16-byte random salt
+       │         (deliberately slow to resist brute-force attacks)
+       ▼
+  master key (32 bytes)
+       │
+       ├─── HKDF-SHA256("stego-ae/v1/encryption") ──→  K_enc
+       │                                               AES-256-GCM encryption key
+       │
+       └─── HKDF-SHA256("stego-ae/v1/positions")  ──→  K_pos
+                                                        PRNG seed for pixel shuffle
+```
+
+### Step 2 — Message Encryption (AES-256-GCM)
+
+Before any bit is written into the image, the plaintext message is fully encrypted:
+
+```
+Plaintext message
+       │
+       ▼
+AES-256-GCM (K_enc, 12-byte random nonce)
+       │
+       ├──→ ciphertext  (same length as plaintext)
+       └──→ auth tag    (16 bytes) — detects tampering or wrong passphrase
+```
+
+The 44-byte **public header** (magic `SGAE`, version, salt, nonce, message length) is authenticated as GCM AAD — it cannot be modified without breaking the tag, even though it is not encrypted.
+
+### Step 3 — Carrier Position Shuffle (PRNG)
+
+K_pos seeds a deterministic **HMAC-SHA256 counter PRNG**, which drives a **Fisher-Yates shuffle** over the available LSB positions in the carrier file. This means:
+- Bits are scattered non-sequentially across the entire image/audio
+- Without the correct passphrase, an attacker cannot know *which* pixels carry secret bits
+- The same passphrase always reproduces the same shuffle (embed and extract agree)
+
+### Step 4 — LSB Embedding
+
+```
+Carrier file (PNG pixels or WAV samples)
+       │
+       ▼
+  First 352 positions  →  header bits  (sequential, not shuffled)
+  Remaining positions  →  ciphertext + auth tag bits  (Fisher-Yates order)
+       │
+  Each bit replaces the Least Significant Bit of one pixel channel
+  (1 bit per carrier → PSNR impact is minimal, typically > 50 dB)
+```
+
+### Capacity & Safety Checks
+
+Before embedding, the engine calculates maximum capacity and **rejects** any message that exceeds it:
+
+```
+Raw capacity  = floor(total_carrier_count / 8)  bytes
+Net capacity  = raw_capacity − 44 (header) − 16 (GCM tag)  bytes
+
+If message_bytes > net_capacity → HTTP 422 CAPACITY_EXCEEDED
+```
+
+### Compliance with Lecturer Requirements
+
+| Requirement | Implementation |
+|---|---|
+| LSB on PNG (or BMP) | ✅ PNG via `sharp`, WAV PCM-16 |
+| Header marking message length | ✅ 44-byte `SGAE` header at first 352 LSB positions |
+| Pixel positions randomised with PRNG + stego-key | ✅ HMAC-SHA256 counter PRNG seeded from K_pos (derived from passphrase + salt) |
+| Message encrypted before embedding | ✅ AES-256-GCM (stronger than XOR) |
+| Capacity check with rejection | ✅ HTTP 422 returned if message exceeds net capacity |
+| Cover & stego displayed side by side | ✅ Velvet Room Forensic Console |
+| PSNR & MSE on ≥ 5 images × 3 message sizes | ✅ Batch analysis in Velvet Room, XLSX export |
+| Histogram comparison cover vs stego | ✅ RGB histogram visualisation per channel |
+| Fragility test: extraction after image/audio re-save | ✅ JPEG/WebP and FLAC/MP3 compression pipelines with extraction result |
+| Enhanced LSB visualisation | ✅ LSB plane view (per-channel) in Velvet Room |
+| Audio WAV support (bonus) | ✅ WAV PCM-16 embed/extract + waveform analysis |
+
+For the full protocol specification see [`docs/ALUR-KRIPTOGRAFI.md`](docs/ALUR-KRIPTOGRAFI.md) and [`docs/ARSITEKTUR.md`](docs/ARSITEKTUR.md).
+
+---
+
+## Project Structure
+
+```
+src/
+├── app/               Next.js routes and /api/* REST endpoints
+├── components/        Reusable UI components (layout, forms, charts)
+├── features/          Page-level feature components (builder, game, velvet-room)
+└── lib/
+    ├── crypto/        PBKDF2 + HKDF, AES-256-GCM, HMAC-SHA256 PRNG
+    ├── stego/         44-byte header, LSB bit I/O, keyed shuffle, capacity
+    ├── media/         PNG (sharp), WAV (wavefile), JPEG/WebP, FLAC, MP3
+    ├── analysis/      MSE/PSNR, histogram, LSB plane visualisation
+    ├── engine/        Embed and extract orchestration
+    ├── export/        XLSX report generation (ExcelJS)
+    └── contracts/     Shared TypeScript types, schemas, and error definitions
+
+prisma/
+└── schema.prisma      Database schema (Map, ClueNode, User, ClueSolve, GameResult)
+
+tests/                 Unit tests (Vitest) — 32 tests across 7 modules
+```
+
+---
+
+## Deployment (Railway)
+
+1. Create a new PostgreSQL service on [Railway](https://railway.app) and copy the `DATABASE_URL`.
+2. Create a new web service and connect your GitHub repository.
+3. Set the following environment variables in Railway:
+   - `DATABASE_URL` — from the Railway PostgreSQL service
+   - `AUTH_SECRET` — generated with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`
+4. After the first deploy, push the database schema:
+   ```bash
+   npm run db:push
+   ```
+
+---
+
+## Running on NixOS / nixpkgs
+
+The repository ships a `flake.nix` that provides the exact Node.js version and all Prisma engine binaries. No manual installation of Node or Prisma engines is needed.
 
 ```bash
+# Enter the Nix dev shell (downloads dependencies automatically)
 nix develop
-# (first time) create the database over the Unix socket:
-psql -h /run/postgresql -U shiend -d postgres -c "CREATE DATABASE stego_ae;"
+
+# First-time only: create the database
+psql -U postgres -c "CREATE DATABASE stego_ae;"
+
+# Then follow the normal steps
+cp .env.example .env   # fill in DATABASE_URL and AUTH_SECRET
 npm install
 npm run db:push
 npm run dev
 ```
 
-For a local NixOS PostgreSQL over the Unix socket, use:
-`DATABASE_URL="postgresql://shiend@localhost:5432/stego_ae?host=/run/postgresql"`.
+**`DATABASE_URL` for a local NixOS PostgreSQL (Unix socket):**
 
-## Scripts
-
-| Command | Purpose |
-|---|---|
-| `npm run dev` | Development server |
-| `npm run build` | Production build |
-| `npm start` | Serve the production build |
-| `npm test` | Unit tests (Vitest) |
-| `npm run lint` | ESLint |
-| `npm run typecheck` | TypeScript check |
-| `npm run db:push` | Sync Prisma schema to the database |
-
-## Pages
-
-- `/login` — account sign-in and registration → Palace Lobby.
-- `/maps` — list of palaces; infiltrate or create a new one.
-- `/builder` — Palace Architect: 15×15 grid, template, nodes, publish.
-- `/play/[id]` — Phantom Infiltration: fog of war, clues, alarm chase, victory.
-- `/velvet-room` — Forensic audit console (manual attack, pair analysis,
-  15-run dataset, XLSX export).
-
-## Crypto engine (reused from the original PRD)
-
-- 44-byte public header (`SGAE`, v1, KDF/iteration fields, salt, nonce) embedded
-  in the first 352 carrier positions.
-- PBKDF2-SHA256 (600k) → HKDF → `K_enc` (AES-256-GCM) and `K_pos` (position PRNG).
-- Fisher-Yates shuffle over the remaining carriers, driven by `K_pos`.
-- Payload spread as LSB bits; header authenticated as GCM AAD.
-
-## Architecture
-
-```
-src/
-  app/               UI routes and /api/* route handlers
-  components/        shared UI (layout, forms, media, analysis, feedback)
-  features/          builder / game / velvet-room flows
-  lib/
-    crypto/          PBKDF2 + HKDF, AES-256-GCM, keystream PRNG
-    stego/           header v1, LSB bits, keyed positions, capacity
-    media/           PNG (sharp), WAV (wavefile), JPEG, FLAC
-    analysis/        MSE/PSNR, histogram, LSB plane, audio
-    engine/          embed / extract orchestration
-    export/          XLSX export
-    contracts/       types, validation schemas, error contract
-    templates.ts     hardcoded 15×15 labyrinth templates
-    db.ts            Prisma client (pg driver adapter)
-prisma/schema.prisma Map + ClueNode models
+```env
+DATABASE_URL="postgresql://YOUR_UNIX_USER@localhost:5432/stego_ae?host=/run/postgresql"
 ```
 
-## Deploying to Railway
+Replace `YOUR_UNIX_USER` with your NixOS username (the one that owns the PostgreSQL socket).
 
-1. Create a PostgreSQL service; copy its `DATABASE_URL`.
-2. Set `DATABASE_URL` in the app's environment.
-3. Build runs `prisma generate` via `postinstall`; run `npm run db:push`
-   (or `prisma migrate deploy`) once to create tables.
-
-## Notes
-
-- FLAC encode/decode runs in the Node runtime (libflac.js), not a browser
-  Worker — a documented fallback; the PCM bit-exact contract is unchanged.
-- Media (cover + stego) is stored as binary in the database, so Railway's
-  ephemeral filesystem is not a concern.
+---
 
 ## Team
 
-- Yusuf Abdurrahman — 247006111102
-- Subagas Herlambang — 247006111100
-- Reza Firmansyah — 247006111114
+| Name | NIM |
+|---|---|
+| Yusuf Abdurrahman | 247006111102 |
+| Subagas Herlambang | 247006111100 |
+| Reza Firmansyah | 247006111114 |
+
+**Course:** Information Security · Universitas Siliwangi · Semester 5 · 2025/2026

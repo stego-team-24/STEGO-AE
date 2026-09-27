@@ -33,9 +33,6 @@ const IMAGE_FORMATS = ["jpeg", "webp"] as const;
 const AUDIO_FORMATS = ["flac", "mp3"] as const;
 type ImageFormat = (typeof IMAGE_FORMATS)[number];
 type AudioFormat = (typeof AUDIO_FORMATS)[number];
-function resultParameter(format: ImageFormat | AudioFormat) {
-  return format === "jpeg" || format === "webp" ? 80 : format === "mp3" ? 128 : 5;
-}
 function artifactFile(artifact: MediaArtifact) {
   const binary = atob(artifact.base64);
   const bytes = new Uint8Array(binary.length);
@@ -52,7 +49,7 @@ function filePreviewKey(file: File) {
 
 function attackColumns(media: "image" | "audio"): TableColumn[] {
   return [
-    { key: "parameter", header: "Format" },
+    { key: "format", header: "Format" },
     { key: "sizeRatio", header: "Size ratio" },
     { key: "mse", header: "MSE" },
     { key: "psnr", header: "PSNR" },
@@ -191,25 +188,49 @@ export function ForensicConsole() {
     return () => { window.clearTimeout(timer); URL.revokeObjectURL(url); };
   }, [attackFile]);
   useEffect(() => {
-    if (!coverFile) { setPairCoverPreview(""); setPairCoverPreviewKey(""); return; }
+    if (!coverFile) {
+      const timer = window.setTimeout(() => {
+        setPairCoverPreview("");
+        setPairCoverPreviewKey("");
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
     const url = URL.createObjectURL(coverFile);
     const timer = window.setTimeout(() => { setPairCoverPreview(url); setPairCoverPreviewKey(filePreviewKey(coverFile)); }, 0);
     return () => { window.clearTimeout(timer); URL.revokeObjectURL(url); };
   }, [coverFile]);
   useEffect(() => {
-    if (!stegoFile) { setPairStegoPreview(""); setPairStegoPreviewKey(""); return; }
+    if (!stegoFile) {
+      const timer = window.setTimeout(() => {
+        setPairStegoPreview("");
+        setPairStegoPreviewKey("");
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
     const url = URL.createObjectURL(stegoFile);
     const timer = window.setTimeout(() => { setPairStegoPreview(url); setPairStegoPreviewKey(filePreviewKey(stegoFile)); }, 0);
     return () => { window.clearTimeout(timer); URL.revokeObjectURL(url); };
   }, [stegoFile]);
   useEffect(() => {
-    if (!audioCoverFile) { setAudioCoverPreview(""); setAudioCoverPreviewKey(""); return; }
+    if (!audioCoverFile) {
+      const timer = window.setTimeout(() => {
+        setAudioCoverPreview("");
+        setAudioCoverPreviewKey("");
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
     const url = URL.createObjectURL(audioCoverFile);
     const timer = window.setTimeout(() => { setAudioCoverPreview(url); setAudioCoverPreviewKey(filePreviewKey(audioCoverFile)); }, 0);
     return () => { window.clearTimeout(timer); URL.revokeObjectURL(url); };
   }, [audioCoverFile]);
   useEffect(() => {
-    if (!audioStegoFile) { setAudioStegoPreview(""); setAudioStegoPreviewKey(""); return; }
+    if (!audioStegoFile) {
+      const timer = window.setTimeout(() => {
+        setAudioStegoPreview("");
+        setAudioStegoPreviewKey("");
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
     const url = URL.createObjectURL(audioStegoFile);
     const timer = window.setTimeout(() => { setAudioStegoPreview(url); setAudioStegoPreviewKey(filePreviewKey(audioStegoFile)); }, 0);
     return () => { window.clearTimeout(timer); URL.revokeObjectURL(url); };
@@ -221,39 +242,42 @@ export function ForensicConsole() {
     const stegoPreviewKey = pairMedia === "IMAGE" ? pairStegoPreviewKey : audioStegoPreviewKey;
     const coverSrc = coverPreviewKey === (cover ? filePreviewKey(cover) : "") ? (pairMedia === "IMAGE" ? pairCoverPreview : audioCoverPreview) : "";
     const stegoSrc = stegoPreviewKey === (stego ? filePreviewKey(stego) : "") ? (pairMedia === "IMAGE" ? pairStegoPreview : audioStegoPreview) : "";
-    if (!cover || !stego) {
-      setPairDisplay(null);
-      setPairPrepared(null);
-      setPairPreviewLoading(false);
-      return;
-    }
-
-    if (!coverSrc || !stegoSrc) {
-      setPairPrepared(null);
-      setPairPreviewLoading(true);
-      setPairDisplay({
-        left: { src: "", label: pairComparison === "stego-compressed" ? "Original stego" : "Raw cover", name: pairComparison === "stego-compressed" ? stego.name : cover.name },
-        right: { src: "", label: pairRightLabel, name: pairComparison === "cover-stego" ? stego.name : `stego-after-${pairAttackFormat}` },
-      });
-      return;
-    }
-
-    const leftIsStego = pairComparison === "stego-compressed";
-    const left = { src: leftIsStego ? stegoSrc : coverSrc, label: leftIsStego ? "Original stego" : "Raw cover", name: leftIsStego ? stego.name : cover.name };
-    if (pairComparison === "cover-stego") {
-      setPairPrepared(null);
-      setPairPreviewLoading(false);
-      setPairDisplay({ left, right: { src: stegoSrc, label: "Original stego", name: stego.name } });
-      return;
-    }
-
-    const key = pairPreparationKey(pairMedia, pairComparison, pairAttackFormat, cover, stego);
     let cancelled = false;
     let temporaryUrl = "";
-    setPairPrepared(null);
-    setPairPreviewLoading(true);
-    setPairDisplay({ left, right: { src: "", label: pairRightLabel, name: `stego-after-${pairAttackFormat}` } });
-    const preparationTimer = window.setTimeout(() => { void (async () => {
+
+    const effectTimer = window.setTimeout(() => {
+      if (cancelled) return;
+      if (!cover || !stego) {
+        setPairDisplay(null);
+        setPairPrepared(null);
+        setPairPreviewLoading(false);
+        return;
+      }
+
+      if (!coverSrc || !stegoSrc) {
+        setPairPrepared(null);
+        setPairPreviewLoading(true);
+        setPairDisplay({
+          left: { src: "", label: pairComparison === "stego-compressed" ? "Original stego" : "Raw cover", name: pairComparison === "stego-compressed" ? stego.name : cover.name },
+          right: { src: "", label: pairRightLabel, name: pairComparison === "cover-stego" ? stego.name : `stego-after-${pairAttackFormat}` },
+        });
+        return;
+      }
+
+      const leftIsStego = pairComparison === "stego-compressed";
+      const left = { src: leftIsStego ? stegoSrc : coverSrc, label: leftIsStego ? "Original stego" : "Raw cover", name: leftIsStego ? stego.name : cover.name };
+      if (pairComparison === "cover-stego") {
+        setPairPrepared(null);
+        setPairPreviewLoading(false);
+        setPairDisplay({ left, right: { src: stegoSrc, label: "Original stego", name: stego.name } });
+        return;
+      }
+
+      const key = pairPreparationKey(pairMedia, pairComparison, pairAttackFormat, cover, stego);
+      setPairPrepared(null);
+      setPairPreviewLoading(true);
+      setPairDisplay({ left, right: { src: "", label: pairRightLabel, name: `stego-after-${pairAttackFormat}` } });
+      void (async () => {
       try {
         const compressed = pairMedia === "IMAGE"
           ? await compressImageArtifact(stego, pairAttackFormat as ImageFormat)
@@ -274,7 +298,7 @@ export function ForensicConsole() {
     })(); }, 0);
     return () => {
       cancelled = true;
-      window.clearTimeout(preparationTimer);
+      window.clearTimeout(effectTimer);
       if (temporaryUrl) URL.revokeObjectURL(temporaryUrl);
     };
   }, [pairMedia, pairComparison, pairAttackFormat, coverFile, stegoFile, audioCoverFile, audioStegoFile, pairCoverPreview, pairStegoPreview, audioCoverPreview, audioStegoPreview, pairCoverPreviewKey, pairStegoPreviewKey, audioCoverPreviewKey, audioStegoPreviewKey, pairRightLabel]);
@@ -386,7 +410,7 @@ export function ForensicConsole() {
         runId: crypto.randomUUID(),
         media: isImageAttack ? "image" : "audio",
         test: attackFormat,
-        parameter: resultParameter(attackFormat),
+        parameter: null,
         inputBytes: attackFile.size,
         outputBytes: compressedFile?.size ?? null,
         metrics: restoredMetrics,
@@ -400,7 +424,7 @@ export function ForensicConsole() {
       setAttackError(err instanceof Error ? `Restored file could not decrypt the message: ${err.message}` : "Restored file could not decrypt the message.");
       setAttackRows((previous) => [...previous, {
         runId: crypto.randomUUID(), media: isImageAttack ? "image" : "audio", test: attackFormat,
-        parameter: resultParameter(attackFormat), inputBytes: attackFile.size, outputBytes: compressedFile?.size ?? null,
+        parameter: null, inputBytes: attackFile.size, outputBytes: compressedFile?.size ?? null,
         metrics: restoredMetrics, pcmIdentical: restoredPcmIdentical, extractionStatus: "FAIL",
         elapsedMs: Math.round(performance.now() - attackStartedAt.current), errorCode: "DECRYPT_FAILED",
       }]);
@@ -560,7 +584,7 @@ export function ForensicConsole() {
           coverFile = new File([coverBlob], `raw-${asset.filename}.${extension}`, { type: mime });
         }
       } catch (error) {
-        rows.push({ filename: asset.filename, media, format: "unavailable", parameter: 0, result: null, status: "ERROR", error: error instanceof Error ? error.message : "Asset unavailable" });
+        rows.push({ filename: asset.filename, media, format: "unavailable", parameter: null, result: null, status: "ERROR", error: error instanceof Error ? error.message : "Asset unavailable" });
         completedSteps += media === "image" ? IMAGE_FORMATS.length : AUDIO_FORMATS.length;
         updateProgress(`Skipping unavailable asset ${assetIndex + 1} of ${selected.length}.`);
         continue;
@@ -588,16 +612,16 @@ export function ForensicConsole() {
             ? await restoreImageArtifact(compressedFile, file)
             : await restoreAudioArtifact(compressedFile, file);
           const restoredFile = artifactFile(restored.artifact);
-          addComparison({ media, test: parameter, parameter: result.parameter ?? resultParameter(parameter), left: file, right: restoredFile, metrics: result.metrics, status: result.extractionStatus, comparison: `Original stego vs ${parameter.toUpperCase()}-restored stego`, pcmIdentical: result.pcmIdentical });
+          addComparison({ media, test: parameter, parameter: null, left: file, right: restoredFile, metrics: result.metrics, status: result.extractionStatus, comparison: `Original stego vs ${parameter.toUpperCase()}-restored stego`, pcmIdentical: result.pcmIdentical });
           if (coverFile) {
             const rawComparison = media === "image"
               ? await analyzeImage(coverFile, restoredFile)
               : await analyzeAudio(coverFile, restoredFile);
-            addComparison({ media, test: parameter, parameter: result.parameter ?? resultParameter(parameter), left: coverFile, right: restoredFile, metrics: rawComparison.metrics, status: result.extractionStatus, comparison: `Raw cover vs ${parameter.toUpperCase()}-restored stego`, pcmIdentical: result.pcmIdentical });
+            addComparison({ media, test: parameter, parameter: null, left: coverFile, right: restoredFile, metrics: rawComparison.metrics, status: result.extractionStatus, comparison: `Raw cover vs ${parameter.toUpperCase()}-restored stego`, pcmIdentical: result.pcmIdentical });
           }
-          rows.push({ filename: file.name, media, format: parameter, parameter: result.parameter ?? resultParameter(parameter), result, status: result.extractionStatus === "PASS" ? "PASS" : result.extractionStatus === "FAIL" ? "FAIL" : "ERROR" });
+          rows.push({ filename: file.name, media, format: parameter, parameter: null, result, status: result.extractionStatus === "PASS" ? "PASS" : result.extractionStatus === "FAIL" ? "FAIL" : "ERROR" });
         } catch (error) {
-          rows.push({ filename: file.name, media, format: parameter, parameter: resultParameter(parameter), result: null, status: "ERROR", error: error instanceof Error ? error.message : "Attack failed" });
+          rows.push({ filename: file.name, media, format: parameter, parameter: null, result: null, status: "ERROR", error: error instanceof Error ? error.message : "Attack failed" });
         }
         completedSteps += 1;
         updateProgress(`Finished ${parameter.toUpperCase()} for asset ${assetIndex + 1} of ${selected.length}.`);
@@ -616,7 +640,7 @@ export function ForensicConsole() {
       buildVersion: "0.1.0",
       environment: "local",
       comparisonSource: `stego tested after ${attackFormat.toUpperCase()} compression and restoration`,
-      parameters: { format: attackFormat, setting: resultParameter(attackFormat), passphrase: null },
+      parameters: { format: attackFormat, passphrase: null },
       rows: attackRows.map((row) => ({
         ...row,
         filename: attackFile?.name ?? null,
@@ -648,7 +672,7 @@ export function ForensicConsole() {
       filename: row.filename,
       compressedFilename: row.result ? `${row.filename.replace(/\.[^.]+$/, "")}.${row.format === "jpeg" ? "jpg" : row.format}` : null,
       compressedBytes: row.result?.outputBytes ?? null,
-      mediaMeta: row.result ? `Format ${row.format.toUpperCase()} · setting ${row.parameter}; extraction ${row.status}; output ${row.result.outputBytes ?? "N/A"} bytes` : row.error ?? null,
+      mediaMeta: row.result ? `Format ${row.format.toUpperCase()} · extraction ${row.status}; output ${row.result.outputBytes ?? "N/A"} bytes` : row.error ?? null,
     }));
     const formats = [...new Set(batchRows.map((row) => row.format))];
     const rows = [...batchComparisonRows, ...errorRows];
@@ -767,7 +791,7 @@ export function ForensicConsole() {
               rows={attackRows.map((r) => {
                 const ratio = r.outputBytes != null ? (r.outputBytes / r.inputBytes).toFixed(3) : "N/A";
                 return {
-                  parameter: r.test.toUpperCase(),
+                  format: r.test.toUpperCase(),
                   sizeRatio: ratio,
                   mse: r.metrics ? r.metrics.mse.toFixed(6) : "N/A",
                   psnr: r.metrics ? (r.metrics.psnrDb == null ? "INF" : `${r.metrics.psnrDb.toFixed(2)} dB`) : "N/A",
@@ -966,7 +990,7 @@ interface BatchAssetRow {
   filename: string;
   media: "image" | "audio";
   format: ImageFormat | AudioFormat | "unavailable";
-  parameter: number;
+  parameter: number | null;
   result: TestResult | null;
   status: "PASS" | "FAIL" | "ERROR";
   error?: string;

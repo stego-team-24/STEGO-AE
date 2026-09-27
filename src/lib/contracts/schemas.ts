@@ -15,8 +15,6 @@ export function utf8Bytes(text: string): number {
   return encoder.encode(text).length;
 }
 
-const jpegQualities: readonly number[] = LIMITS.jpegQualities;
-const flacLevels: readonly number[] = LIMITS.flacLevels;
 
 export const passphraseSchema = z
   .string()
@@ -38,22 +36,6 @@ export const messageSchema = z
   .refine(
     (value) => utf8Bytes(value) <= LIMITS.maxMessageBytes,
     `Message must be at most ${LIMITS.maxMessageBytes} UTF-8 bytes.`,
-  );
-
-export const jpegQualitySchema = z.coerce
-  .number()
-  .int()
-  .refine(
-    (value) => jpegQualities.includes(value),
-    `JPEG quality must be one of ${jpegQualities.join(", ")}.`,
-  );
-
-export const flacLevelSchema = z.coerce
-  .number()
-  .int()
-  .refine(
-    (value) => flacLevels.includes(value),
-    `FLAC level must be one of ${flacLevels.join(", ")}.`,
   );
 
 export const imageCompressionFormatSchema = z.enum(["jpeg", "webp"]);

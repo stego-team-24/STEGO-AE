@@ -17,15 +17,19 @@ export default function Template({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
 
   useLayoutEffect(() => {
-    setExiting(false);
-    setReady(true);
-    setOpening(!window.matchMedia("(prefers-reduced-motion: reduce)").matches);
     document.body.classList.remove("p5-route-closing");
-    if (openingTimer.current) clearTimeout(openingTimer.current);
-    if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      openingTimer.current = setTimeout(() => setOpening(false), ENTRY_TRANSITION_MS);
-    }
+    const routeTimer = window.setTimeout(() => {
+      setExiting(false);
+      setReady(true);
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      setOpening(!reducedMotion);
+      if (openingTimer.current) clearTimeout(openingTimer.current);
+      if (!reducedMotion) {
+        openingTimer.current = setTimeout(() => setOpening(false), ENTRY_TRANSITION_MS);
+      }
+    }, 0);
     return () => {
+      window.clearTimeout(routeTimer);
       if (timer.current) clearTimeout(timer.current);
       if (openingTimer.current) clearTimeout(openingTimer.current);
       document.body.classList.remove("p5-route-closing");

@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react";
 
 export type Language = "en" | "id";
 
@@ -461,22 +461,36 @@ const textOutputs = new WeakMap<Text, string>();
 const attributeSources = new WeakMap<Element, Map<string, string>>();
 const attributeOutputs = new WeakMap<Element, Map<string, string>>();
 
+function subscribeLanguage(callback: () => void) {
+  window.addEventListener("storage", callback);
+  window.addEventListener("stego-language-change", callback);
+  return () => {
+    window.removeEventListener("storage", callback);
+    window.removeEventListener("stego-language-change", callback);
+  };
+}
+
+function getLanguageSnapshot(): Language {
+  if (typeof window === "undefined") return "en";
+  const stored = window.localStorage.getItem("stego-ae-language");
+  return stored === "en" || stored === "id" ? stored : "en";
+}
+
+function getServerLanguageSnapshot(): Language {
+  return "en";
+}
+
 export function LanguageProvider({ children }: { children: ReactNode }) {
-  const [language, setLanguageState] = useState<Language>("en");
+  const language = useSyncExternalStore(subscribeLanguage, getLanguageSnapshot, getServerLanguageSnapshot);
   const setLanguage = useCallback((next: Language) => {
-    setLanguageState(next);
     window.localStorage.setItem("stego-ae-language", next);
+    window.dispatchEvent(new Event("stego-language-change"));
     document.body.classList.remove("language-transition");
     void document.body.offsetWidth;
     document.body.classList.add("language-transition");
     window.setTimeout(() => document.body.classList.remove("language-transition"), 420);
   }, []);
   const contextValue = useMemo(() => ({ language, setLanguage }), [language, setLanguage]);
-
-  useEffect(() => {
-    const stored = window.localStorage.getItem("stego-ae-language");
-    if (stored === "en" || stored === "id") setLanguageState(stored);
-  }, []);
 
   useEffect(() => {
     document.documentElement.lang = language;

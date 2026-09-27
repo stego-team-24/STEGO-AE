@@ -156,7 +156,7 @@ export async function buildXlsx(options: XlsxOptions): Promise<Blob> {
     ["media_meta", "Image dimensions or audio sample rate/channels/frames/bit depth."],
     ["message_bytes", "UTF-8 byte length of the embedded plaintext, when known."],
     ["test", "baseline, jpeg, webp, flac, or mp3."],
-    ["parameter", "Fixed codec setting: JPEG/WebP quality, FLAC effort level, or MP3 bitrate."],
+    ["parameter", "Reserved for test parameters; compression format is recorded in the test column."],
     ["input_bytes", "Size of the input media in bytes."],
     ["output_bytes", "Size of the output (JPEG, WebP, FLAC, or MP3) media in bytes."],
     ["size_ratio", "output_bytes / input_bytes."],

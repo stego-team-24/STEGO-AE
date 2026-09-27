@@ -50,12 +50,17 @@ next-env.d.ts
 
 # etc
 /.commandcode/
+/.codex/
+/.agents/
 /PRD/
+/docs/
 command-code-session-*.html
 codex
 .direnv/
 .figma-token
 codex-session-*.md
+AGENTS.md
+CLAUDE.md
 
 # nix build result symlinks
 /result

@@ -33,7 +33,7 @@ export interface TestResult {
   runId: string;
   media: Media;
   test: TestKind;
-  /** Fixed codec setting (image quality, FLAC effort, MP3 bitrate), or `null`. */
+  /** Reserved for non-compression test parameters; compression results leave it null. */
   parameter: number | null;
   inputBytes: number;
   outputBytes: number | null;
@@ -227,7 +227,5 @@ export const LIMITS = {
   maxJsonResponseBytes: 4_000_000,
   maxThumbnailPx: 256,
   pcmPeak: 32_768,
-  jpegQualities: [90, 70, 50],
-  flacLevels: [0, 5, 8],
   datasetMessageSizes: [64, 512, 2048],
 } as const;

@@ -64,7 +64,7 @@ export async function POST(request: Request) {
       runId: createRunId(),
       media: "image",
       test: format,
-      parameter: 80,
+      parameter: null,
       inputBytes: bytes.length,
       outputBytes,
       metrics,

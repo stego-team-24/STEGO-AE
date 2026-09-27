@@ -2,7 +2,7 @@ import { audioCompressionFormatSchema, parseOrThrow, readField } from "@/lib/con
 import { jsonOk, readUpload, runHandler, toBase64 } from "@/lib/api/http";
 import { decodeWav, encodeWav } from "@/lib/media/wav";
 import { flacRoundTrip } from "@/lib/media/flac";
-import { decodeMp3ToCarrier, encodeMp3, MP3_BITRATE_KBPS } from "@/lib/media/mp3";
+import { decodeMp3ToCarrier, encodeMp3 } from "@/lib/media/mp3";
 
 export const runtime = "nodejs";
 
@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     const format = parseOrThrow(audioCompressionFormatSchema, readField(form, "format"), "format");
     const wav = decodeWav(bytes);
     const { artifactBytes, decodedSamples } = format === "flac"
-      ? await flacRoundTrip(wav.samples, wav.sampleRate, wav.channels, 16, 5).then(({ flacBytes, decoded }) => ({ artifactBytes: flacBytes, decodedSamples: decoded }))
+      ? await flacRoundTrip(wav.samples, wav.sampleRate, wav.channels, 16).then(({ flacBytes, decoded }) => ({ artifactBytes: flacBytes, decodedSamples: decoded }))
       : await encodeMp3(wav).then(async (mp3Bytes) => {
           const decoded = await decodeMp3ToCarrier(mp3Bytes, wav);
           return { artifactBytes: mp3Bytes, decodedSamples: decoded.samples };
@@ -25,7 +25,6 @@ export async function POST(request: Request) {
     return jsonOk({
       artifact: { name: `${format}-${stem}.${extension}`, mime, size: artifactBytes.length, base64: toBase64(artifactBytes) },
       playback: { name: `${stem}-after-${format}.wav`, mime: "audio/wav", size: playbackBytes.length, base64: toBase64(playbackBytes) },
-      parameter: format === "flac" ? 5 : MP3_BITRATE_KBPS,
       format,
     });
   });

@@ -1,7 +1,6 @@
 import type { Metrics, TestResult } from "@/lib/contracts/types";
 import { ApiError } from "@/lib/contracts/errors";
 import {
-  flacLevelSchema,
   audioCompressionFormatSchema,
   parseOrThrow,
   passphraseSchema,
@@ -11,7 +10,7 @@ import { decodeWav } from "@/lib/media/wav";
 import { flacRoundTrip } from "@/lib/media/flac";
 import { audioMetrics, samplesIdentical } from "@/lib/analysis/audio";
 import { extractAudioPayload } from "@/lib/engine/extract";
-import { decodeMp3ToCarrier, encodeMp3, MP3_BITRATE_KBPS } from "@/lib/media/mp3";
+import { decodeMp3ToCarrier, encodeMp3 } from "@/lib/media/mp3";
 import { createRunId, jsonOk, readUpload, runHandler } from "@/lib/api/http";
 
 export const runtime = "nodejs";
@@ -26,7 +25,6 @@ export async function POST(request: Request) {
       "passphrase",
     );
     const format = parseOrThrow(audioCompressionFormatSchema, form.get("format") ?? "flac", "format");
-    const level = format === "flac" ? parseOrThrow(flacLevelSchema, form.get("level") ?? "5", "level") : MP3_BITRATE_KBPS;
 
     const cover = decodeWav(bytes);
 
@@ -43,7 +41,7 @@ export async function POST(request: Request) {
       let encoded: Uint8Array;
       let decodedCarrier;
       if (format === "flac") {
-        const result = await flacRoundTrip(cover.samples, cover.sampleRate, cover.channels, 16, level);
+        const result = await flacRoundTrip(cover.samples, cover.sampleRate, cover.channels, 16);
         encoded = result.flacBytes;
         decodedCarrier = { ...cover, samples: result.decoded };
       } else {
@@ -75,7 +73,7 @@ export async function POST(request: Request) {
       runId: createRunId(),
       media: "audio",
       test: format,
-      parameter: level,
+      parameter: null,
       inputBytes: bytes.length,
       outputBytes,
       metrics,

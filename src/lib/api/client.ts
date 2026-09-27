@@ -102,7 +102,7 @@ export interface MediaArtifact {
 }
 
 export function compressImageArtifact(file: File, format: "jpeg" | "webp") {
-  return postForm<{ artifact: MediaArtifact; parameter: number; format: "jpeg" | "webp" }>("/api/image/pipeline/compress", formWithFile(file, { format }));
+  return postForm<{ artifact: MediaArtifact; format: "jpeg" | "webp" }>("/api/image/pipeline/compress", formWithFile(file, { format }));
 }
 
 export function restoreImageArtifact(compressed: File, source: File) {
@@ -112,7 +112,7 @@ export function restoreImageArtifact(compressed: File, source: File) {
 }
 
 export function compressAudioArtifact(file: File, format: "flac" | "mp3") {
-  return postForm<{ artifact: MediaArtifact; playback: MediaArtifact; parameter: number; format: "flac" | "mp3" }>("/api/audio/pipeline/compress", formWithFile(file, { format }));
+  return postForm<{ artifact: MediaArtifact; playback: MediaArtifact; format: "flac" | "mp3" }>("/api/audio/pipeline/compress", formWithFile(file, { format }));
 }
 
 export function restoreAudioArtifact(compressed: File, source: File) {
