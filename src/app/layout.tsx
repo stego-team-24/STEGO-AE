@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { GameHeader } from "@/components/layout/GameHeader";
+import { RouteTransition } from "@/components/layout/RouteTransition";
 import { LanguageProvider } from "@/components/i18n/LanguageProvider";
 
 function AppFrame({ children }: { children: React.ReactNode }) {
@@ -26,7 +27,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="en" className="h-full">
       <body className="min-h-full">
         <LanguageProvider>
-          <AppFrame>{children}</AppFrame>
+          <RouteTransition>
+            <AppFrame>{children}</AppFrame>
+          </RouteTransition>
         </LanguageProvider>
       </body>
     </html>

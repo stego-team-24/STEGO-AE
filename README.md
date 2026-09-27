@@ -10,9 +10,9 @@ STEGO-AE is a full-stack web application that combines **authenticated encryptio
 
 | Feature | Description |
 |---|---|
-| 🏰 **Palace Architect** | Build a custom labyrinth: place an entrance, treasure, clue nodes, and shadow guards. Embed a secret message into each clue's PNG/WAV media. |
-| 🎭 **Phantom Infiltration** | Explore the labyrinth under fog-of-war. Extract hidden messages from media files to unlock clues, survive guard detection, and reach the treasure. |
-| 🔬 **Velvet Room** | Forensic audit console: MSE/PSNR quality metrics, RGB histograms, LSB plane visualisation, JPEG/WebP/FLAC/MP3 compression tests, and XLSX report export. |
+| **Palace Architect** | Build a custom labyrinth: place an entrance, treasure, clue nodes, and shadow guards. Embed a secret message into each clue's PNG/WAV media. |
+| **Phantom Infiltration** | Explore the labyrinth under fog-of-war. Extract hidden messages from media files to unlock clues, survive guard detection, and reach the treasure. |
+| **Velvet Room** | Forensic audit console: MSE/PSNR quality metrics, RGB histograms, LSB plane visualisation, JPEG/WebP/FLAC/MP3 compression tests, and XLSX report export. |
 
 ---
 
@@ -24,7 +24,7 @@ STEGO-AE is a full-stack web application that combines **authenticated encryptio
 - **Database**: PostgreSQL + Prisma ORM
 - **Crypto**: Node.js built-in `crypto` (PBKDF2, HKDF, AES-256-GCM)
 - **Media**: `sharp` (PNG/JPEG), `wavefile` (WAV), `libflac.js` (FLAC), `lamejs` (MP3)
-- **Testing**: Vitest (32 tests, 100% pass rate)
+- **Testing**: Vitest
 
 ---
 
@@ -47,8 +47,8 @@ Make sure the following are installed on your computer before proceeding:
 ### Step 1 — Clone the repository
 
 ```bash
-git clone <repository-url>
-cd stego-ae
+git clone https://github.com/stego-team-24/STEGO-AE.git
+cd STEGO-AE
 ```
 
 ### Step 2 — Set up environment variables
@@ -64,7 +64,7 @@ Open `.env` and fill in the two required values:
 ```env
 # PostgreSQL connection string
 # Format: postgresql://USER:PASSWORD@HOST:PORT/DATABASE_NAME
-DATABASE_URL="postgresql://postgres:yourpassword@localhost:5432/stego_ae"
+DATABASE_URL="postgresql://postgres:yourpassword@localhost:5432/STEGO-AE"
 
 # Random 64-character hex string used to sign session cookies
 # Generate one by running the command below:
@@ -86,7 +86,7 @@ Copy the output and paste it as the value of `AUTH_SECRET` in your `.env` file.
 psql -U postgres
 
 # Inside the prompt:
-CREATE DATABASE stego_ae;
+CREATE DATABASE STEGO_AE;
 \q
 ```
 
@@ -280,7 +280,7 @@ The repository ships a `flake.nix` that provides the exact Node.js version and a
 nix develop
 
 # First-time only: create the database
-psql -U postgres -c "CREATE DATABASE stego_ae;"
+psql -U postgres -c "CREATE DATABASE STEGO_AE;"
 
 # Then follow the normal steps
 cp .env.example .env   # fill in DATABASE_URL and AUTH_SECRET
@@ -292,7 +292,7 @@ npm run dev
 **`DATABASE_URL` for a local NixOS PostgreSQL (Unix socket):**
 
 ```env
-DATABASE_URL="postgresql://YOUR_UNIX_USER@localhost:5432/stego_ae?host=/run/postgresql"
+DATABASE_URL="postgresql://YOUR_UNIX_USER@localhost:5432/STEGO-AE?host=/run/postgresql"
 ```
 
 Replace `YOUR_UNIX_USER` with your NixOS username (the one that owns the PostgreSQL socket).
