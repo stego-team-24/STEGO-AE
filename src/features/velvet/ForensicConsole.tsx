@@ -33,6 +33,10 @@ const IMAGE_FORMATS = ["jpeg", "webp"] as const;
 const AUDIO_FORMATS = ["flac", "mp3"] as const;
 type ImageFormat = (typeof IMAGE_FORMATS)[number];
 type AudioFormat = (typeof AUDIO_FORMATS)[number];
+type AnalysisZoomTarget =
+  | { kind: "histogram"; channel: "r" | "g" | "b" }
+  | { kind: "lsb"; channel: "r" | "g" | "b" };
+
 function artifactFile(artifact: MediaArtifact) {
   const binary = atob(artifact.base64);
   const bytes = new Uint8Array(binary.length);
@@ -55,7 +59,6 @@ function attackColumns(media: "image" | "audio"): TableColumn[] {
     { key: "psnr", header: "PSNR" },
     { key: "pcmIdentical", header: media === "image" ? "Extraction" : "PCM identical" },
     { key: "status", header: "Status" },
-    { key: "elapsed", header: "Elapsed (ms)" },
   ];
 }
 
@@ -155,6 +158,7 @@ export function ForensicConsole() {
   const [audioStegoPreview, setAudioStegoPreview] = useState("");
   const [pairError, setPairError] = useState<string | null>(null);
   const [pairFullscreen, setPairFullscreen] = useState(false);
+  const [analysisZoom, setAnalysisZoom] = useState<AnalysisZoomTarget | null>(null);
   const [pairSourceMap, setPairSourceMap] = useState("");
   const [pairCoverClue, setPairCoverClue] = useState("");
   const [pairCoverPreview, setPairCoverPreview] = useState("");
@@ -180,6 +184,15 @@ export function ForensicConsole() {
   const isImageAttack = attackFile?.type === "image/png";
   const pairLeftLabel = pairComparison === "stego-compressed" ? "Original stego" : "Raw cover";
   const pairRightLabel = pairComparison === "cover-stego" ? "Original stego" : `Stego restored after ${pairAttackFormat.toUpperCase()}`;
+
+  useEffect(() => {
+    if (!analysisZoom) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAnalysisZoom(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [analysisZoom]);
 
   useEffect(() => {
     if (!attackFile) return;
@@ -803,7 +816,6 @@ export function ForensicConsole() {
                         ? "TRUE"
                         : "FALSE",
                   status: r.extractionStatus === "PASS" ? "PASS" : r.extractionStatus === "FAIL" ? "FAIL" : "ERROR",
-                  elapsed: r.elapsedMs,
                 };
               })}
             />
@@ -875,11 +887,11 @@ export function ForensicConsole() {
               />
               <MetricCard label="Identical" value={pairResult.metrics.identical ? "TRUE" : "FALSE"} />
             </div>
-            <div className="flex items-center justify-between">
-              <h3 className="text-[15px] font-medium">Combined RGB histogram · {pairLeftLabel} vs {pairRightLabel}</h3>
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-[15px] font-medium">RGB channel histograms · {pairLeftLabel} vs {pairRightLabel}</h3>
             </div>
-            <HistogramChart cover={pairResult.histograms.cover} stego={pairResult.histograms.stego} />
-            <div><h3 className="mb-2 text-[13px] font-medium">Enhanced LSB · grayscale channel planes</h3><div className="space-y-5">{([['r','Red'],['g','Green'],['b','Blue']] as const).map(([channel,label]) => <div key={channel}><h4 className="mb-2 text-[12px] text-muted">{label}</h4><div className="grid gap-4 min-[900px]:grid-cols-2"><div><p className="mb-1 text-[10px] text-muted">{pairLeftLabel}</p><ImagePreview src={`data:image/png;base64,${pairResult.lsbChannels.cover[channel]}`} alt={`${label} ${pairLeftLabel} LSB plane`} /></div><div><p className="mb-1 text-[10px] text-muted">{pairRightLabel}</p><ImagePreview src={`data:image/png;base64,${pairResult.lsbChannels.stego[channel]}`} alt={`${label} ${pairRightLabel} LSB plane`} /></div></div></div>)}</div></div>
+            <HistogramChart cover={pairResult.histograms.cover} stego={pairResult.histograms.stego} coverLabel={pairLeftLabel} stegoLabel={pairRightLabel} onZoomChannel={(channel) => setAnalysisZoom({ kind: "histogram", channel })} />
+            <div><h3 className="mb-2 text-[13px] font-medium">Enhanced LSB · grayscale channel planes</h3><div className="space-y-5">{([['r','Red'],['g','Green'],['b','Blue']] as const).map(([channel,label]) => <div key={channel}><h4 className="mb-2 text-[12px]">{label}</h4><div className="grid gap-4 min-[900px]:grid-cols-2">{(["cover", "stego"] as const).map((side) => { const sideLabel = side === "cover" ? pairLeftLabel : pairRightLabel; const src = `data:image/png;base64,${pairResult.lsbChannels[side][channel]}`; return <div key={side}><p className="mb-1 text-[10px] text-muted">{sideLabel}</p><button type="button" onClick={() => setAnalysisZoom({ kind: "lsb", channel })} className="block w-full cursor-zoom-in text-left" aria-label={`Expand ${label} ${sideLabel} enhanced LSB`}><ImagePreview src={src} alt={`${label} ${sideLabel} LSB plane`} /><span className="mt-1 block text-right text-[10px] text-muted">⤢ Zoom {label} comparison</span></button></div>; })}</div></div>)}</div></div>
           </div>
         ) : null}
         {pairMedia === "AUDIO" && audioPairResult ? <div className="mt-4 space-y-4">
@@ -899,6 +911,17 @@ export function ForensicConsole() {
             <button type="button" className="absolute right-4 top-4 z-10 rounded-control border border-white/30 bg-black/80 px-4 py-2 text-white sm:right-6 sm:top-6">Close ✕</button>
             <div className="grid h-full w-full grid-cols-2 gap-2 pt-12 sm:gap-5 sm:pt-2" onClick={(event) => event.stopPropagation()}>
               {[pairDisplay.left, pairDisplay.right].map(({ src, label, name }) => <section key={label} className="flex min-h-0 min-w-0 flex-col border border-accent/30 bg-[#0c0c0c] p-1.5 sm:p-3"><div className="mb-2 flex shrink-0 flex-col gap-1 text-[10px] text-white sm:flex-row sm:items-center sm:justify-between sm:text-[11px]"><strong>{label}</strong><span className="truncate font-mono text-muted">{name}</span></div><div className="grid min-h-0 flex-1 place-items-center"><ImagePreview src={src} alt={label} className="p5-zoom-enter max-h-full max-w-full object-contain" /></div></section>)}
+            </div>
+          </div>, document.body) : null}
+        {analysisZoom && typeof document !== "undefined" ? createPortal(
+          <div role="dialog" aria-modal="true" aria-label="Expanded forensic analysis" className="fixed inset-0 z-[110] overflow-auto bg-black/98 p-3 sm:p-6" onClick={() => setAnalysisZoom(null)}>
+            <button type="button" onClick={() => setAnalysisZoom(null)} className="fixed right-4 top-4 z-10 rounded-control border border-white/30 bg-black/80 px-4 py-2 text-white sm:right-6 sm:top-6">Close ✕</button>
+            <div className={`mx-auto flex min-h-full w-full ${analysisZoom.kind === "lsb" ? "max-w-none" : "max-w-7xl"} flex-col justify-center gap-4 pt-14 sm:pt-4`} onClick={(event) => event.stopPropagation()}>
+              <h2 className="text-center text-sm font-medium text-white">{analysisZoom.kind === "histogram" ? `${analysisZoom.channel.toUpperCase()} histogram · ${pairLeftLabel} vs ${pairRightLabel}` : `${analysisZoom.channel.toUpperCase()} enhanced LSB · ${pairLeftLabel} vs ${pairRightLabel}`}</h2>
+              {analysisZoom.kind === "histogram" && pairResult ? <div className="w-full overflow-x-auto"><HistogramChart layout="compare" focusChannel={analysisZoom.channel} cover={pairResult.histograms.cover} stego={pairResult.histograms.stego} coverLabel={pairLeftLabel} stegoLabel={pairRightLabel} /></div> : null}
+              {analysisZoom.kind === "lsb" && pairResult ? <div className="grid min-h-0 min-w-[700px] flex-1 grid-cols-2 gap-3 sm:gap-5">
+                {([ { side: "cover" as const, title: pairLeftLabel }, { side: "stego" as const, title: pairRightLabel } ]).map(({ side, title }) => <section key={side} className="flex min-h-[78vh] min-w-0 flex-col border border-accent/30 bg-[#0c0c0c] p-2 sm:p-4"><h3 className="mb-2 text-center text-sm font-semibold text-white">{title}</h3><div className="grid min-h-0 flex-1 place-items-center"><ImagePreview src={`data:image/png;base64,${pairResult.lsbChannels[side][analysisZoom.channel]}`} alt={`${analysisZoom.channel.toUpperCase()} ${title} enhanced LSB plane`} className="max-h-[78vh] w-full object-contain" /></div></section>)}
+              </div> : null}
             </div>
           </div>, document.body) : null}
       </Section>
@@ -946,7 +969,7 @@ export function ForensicConsole() {
                 { key: "codec", header: "Codec" },
                 { key: "mse", header: "MSE" },
                 { key: "psnr", header: "PSNR" },
-                { key: "pcm", header: "PCM identical" },
+                { key: "mediaIntegrity", header: "Media identical" },
                 { key: "status", header: "Extraction" },
               ]}
               rows={auditComparisonRows.map((row) => ({
@@ -957,7 +980,7 @@ export function ForensicConsole() {
                 codec: row.test === "baseline" ? "ORIGINAL" : row.test.toUpperCase(),
                 mse: row.metrics ? row.metrics.mse.toFixed(6) : row.mediaMeta ?? "N/A",
                 psnr: row.metrics ? (row.metrics.psnrDb == null ? "INF" : `${row.metrics.psnrDb.toFixed(2)} dB`) : "N/A",
-                pcm: row.media === "audio" && row.pcmIdentical !== null ? (row.pcmIdentical ? "YES" : "NO") : "N/A",
+                mediaIntegrity: row.metrics ? (row.metrics.identical ? "YES" : "NO") : "N/A",
                 status: row.extractionStatus === "NOT_RUN" ? "BASELINE" : row.extractionStatus,
               }))}
             />
@@ -1012,35 +1035,47 @@ function formatBytes(bytes: number) {
 }
 
 function AudioComparisonChart({ cover, stego, changedRate }: { cover: number[]; stego: number[]; changedRate: number[] }) {
-  const width = 800;
-  const height = 220;
+  const [zoom, setZoom] = useState(1);
+  const [position, setPosition] = useState(50);
+  const width = 1100;
+  const height = 300;
   const left = 42;
   const right = 12;
   const top = 16;
   const bottom = 30;
   const count = Math.min(cover.length, stego.length);
-  const points = (values: number[]) => values.slice(0, count).map((value, index) => {
-    const x = left + (index / Math.max(1, count - 1)) * (width - left - right);
+  const visible = Math.max(1, Math.floor(count / zoom));
+  const start = Math.max(0, Math.min(count - visible, Math.round((count - visible) * position / 100)));
+  const rateVisible = Math.max(1, Math.floor(changedRate.length / zoom));
+  const rateStart = Math.max(0, Math.min(changedRate.length - rateVisible, Math.round((changedRate.length - rateVisible) * position / 100)));
+  const points = (values: number[]) => values.slice(start, start + visible).map((value, index) => {
+    const x = left + (index / Math.max(1, visible - 1)) * (width - left - right);
     const y = top + (1 - Math.min(1, value)) * (height - top - bottom);
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(" ");
-  const ratePeak = Math.max(0.0001, ...changedRate);
-  const barWidth = (width - left - right) / changedRate.length;
+  const visibleRates = changedRate.slice(rateStart, rateStart + rateVisible);
+  const ratePeak = Math.max(0.0001, ...visibleRates);
+  const barWidth = (width - left - right) / visibleRates.length;
   return <div className="rounded-control border border-line bg-canvas p-3">
+    <div className="mb-3 grid gap-2 rounded-control border border-line p-3 text-[11px] text-muted">
+      <label className="grid grid-cols-[auto_1fr_auto] items-center gap-3"><span>Zoom</span><input aria-label="Audio chart zoom" type="range" min="1" max="64" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} /><span>{zoom}×</span></label>
+      {zoom > 1 ? <label className="grid grid-cols-[auto_1fr_auto] items-center gap-3"><span>Scroll through audio</span><input aria-label="Audio chart position" type="range" min="0" max="100" value={position} onChange={(event) => setPosition(Number(event.target.value))} /><span>{Math.floor(start / count * 100)}–{Math.ceil((start + visible) / count * 100)}%</span></label> : null}
+      <p>Showing {Math.floor(start / count * 100)}–{Math.ceil((start + visible) / count * 100)}% of the audio.</p>
+    </div>
     <h4 className="mb-1 text-[11px] font-medium text-ink">Signal level (RMS)</h4>
     <div className="mb-1 flex flex-wrap gap-4 text-[10px] text-muted"><span className="text-sky-400">— Raw cover</span><span className="text-accent">— Stego</span></div>
     <svg viewBox={`0 0 ${width} ${height}`} className="block h-auto w-full" role="img" aria-label="Root mean square audio signal level across time, comparing raw cover and stego">
       {[0, 0.5, 1].map((fraction) => { const y = top + (1 - fraction) * (height - top - bottom); return <g key={fraction}><line x1={left} x2={width - right} y1={y} y2={y} stroke="#343448" strokeDasharray="3 4" /><text x={left - 8} y={y + 4} fill="#b1b1c3" textAnchor="end" fontSize="12">{fraction.toFixed(1)}</text></g>; })}
       <polyline points={points(cover)} fill="none" stroke="#38bdf8" strokeWidth="2" />
       <polyline points={points(stego)} fill="none" stroke="#e4be70" strokeWidth="1.5" />
-      <text x={left} y={height - 6} fill="#b1b1c3" fontSize="12">Start</text><text x={width - right} y={height - 6} fill="#b1b1c3" textAnchor="end" fontSize="12">End</text>
+      <text x={left} y={height - 6} fill="#b1b1c3" fontSize="12">{Math.floor(start / count * 100)}%</text><text x={width - right} y={height - 6} fill="#b1b1c3" textAnchor="end" fontSize="12">{Math.ceil((start + visible) / count * 100)}%</text>
     </svg>
     <p className="mb-4 text-[10px] text-muted">RMS smooths the signal into average energy per time bucket. The two lines may overlap because LSB changes are tiny.</p>
     <h4 className="mb-1 text-[11px] font-medium text-ink">Samples changed per time bucket</h4>
     <svg viewBox={`0 0 ${width} ${height}`} className="block h-auto w-full" role="img" aria-label="Percentage of changed audio samples in each time bucket">
       {[0, 0.5, 1].map((fraction) => { const y = top + (1 - fraction) * (height - top - bottom); return <g key={fraction}><line x1={left} x2={width - right} y1={y} y2={y} stroke="#343448" strokeDasharray="3 4" /><text x={left - 8} y={y + 4} fill="#b1b1c3" textAnchor="end" fontSize="12">{(ratePeak * fraction * 100).toFixed(1)}%</text></g>; })}
-      {changedRate.map((rate, index) => { const barHeight = (rate / ratePeak) * (height - top - bottom); return <rect key={index} x={left + index * barWidth} y={top + (height - top - bottom) - barHeight} width={Math.max(1, barWidth - 0.5)} height={barHeight} fill="#ef6262" opacity="0.86" />; })}
-      <text x={left} y={height - 6} fill="#b1b1c3" fontSize="12">Start</text><text x={width - right} y={height - 6} fill="#b1b1c3" textAnchor="end" fontSize="12">End</text>
+      {visibleRates.map((rate, index) => { const barHeight = (rate / ratePeak) * (height - top - bottom); return <rect key={rateStart + index} x={left + index * barWidth} y={top + (height - top - bottom) - barHeight} width={Math.max(1, barWidth - 0.5)} height={barHeight} fill="#ef6262" opacity="0.86" />; })}
+      <text x={left} y={height - 6} fill="#b1b1c3" fontSize="12">{Math.floor(rateStart / changedRate.length * 100)}%</text><text x={width - right} y={height - 6} fill="#b1b1c3" textAnchor="end" fontSize="12">{Math.ceil((rateStart + rateVisible) / changedRate.length * 100)}%</text>
     </svg>
     <p className="mt-1 text-[10px] text-muted">Bars use an auto-scaled percent axis. Higher bars mark regions where more PCM samples differ.</p>
   </div>;
