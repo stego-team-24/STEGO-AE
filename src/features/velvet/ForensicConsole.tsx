@@ -16,6 +16,8 @@ import {
   compressAudioArtifact,
   compressImage,
   compressImageArtifact,
+  inspectAudio,
+  inspectImage,
   extractAudio,
   extractImage,
   fetchMap,
@@ -562,6 +564,8 @@ export function ForensicConsole() {
       status: TestResult["extractionStatus"];
       comparison: string;
       pcmIdentical?: boolean | null;
+      payloadVariation?: string | null;
+      messageBytes?: number | null;
     }) => comparisons.push({
       runId: `${args.left.name}-${args.test}-${args.right.name}`,
       media: args.media,
@@ -577,6 +581,8 @@ export function ForensicConsole() {
       comparison: args.comparison,
       filename: args.left.name,
       referenceFilename: args.right.name,
+      payloadVariation: args.payloadVariation ?? null,
+      messageBytes: args.messageBytes ?? null,
       mediaMeta: args.test === "baseline" ? "Uncompressed baseline" : `${args.test.toUpperCase()} restored output · extraction ${args.status}`,
     });
     for (let assetIndex = 0; assetIndex < selected.length; assetIndex += 1) {
@@ -602,11 +608,28 @@ export function ForensicConsole() {
         updateProgress(`Skipping unavailable asset ${assetIndex + 1} of ${selected.length}.`);
         continue;
       }
+      let payloadVariation: string | null = null;
+      let messageBytes: number | null = null;
+      if (coverFile) {
+        try {
+          const extracted = media === "image"
+            ? await extractImage(file, asset.passphrase)
+            : await extractAudio(file, asset.passphrase);
+          const capacity = media === "image"
+            ? await inspectImage(coverFile)
+            : await inspectAudio(coverFile);
+          messageBytes = extracted.messageBytes;
+          payloadVariation = capacity.capacityBytes > 0 ? `${((extracted.messageBytes / capacity.capacityBytes) * 100).toFixed(2)}%` : null;
+        } catch {
+          payloadVariation = null;
+          messageBytes = null;
+        }
+      }
       if (coverFile) {
         try {
           updateProgress(`Comparing original files for asset ${assetIndex + 1} of ${selected.length}…`);
           const baseline = media === "image" ? await analyzeImage(coverFile, file) : await analyzeAudio(coverFile, file);
-          addComparison({ media, test: "baseline", parameter: null, left: coverFile, right: file, metrics: baseline.metrics, status: "NOT_RUN", comparison: "Raw cover vs original stego" });
+          addComparison({ media, test: "baseline", parameter: null, left: coverFile, right: file, metrics: baseline.metrics, status: "NOT_RUN", comparison: "Raw cover vs original stego", payloadVariation, messageBytes });
         } catch {
           // Keep the compression rows even if a raw-pair metric cannot be computed.
         }
@@ -625,12 +648,14 @@ export function ForensicConsole() {
             ? await restoreImageArtifact(compressedFile, file)
             : await restoreAudioArtifact(compressedFile, file);
           const restoredFile = artifactFile(restored.artifact);
-          addComparison({ media, test: parameter, parameter: null, left: file, right: restoredFile, metrics: result.metrics, status: result.extractionStatus, comparison: `Original stego vs ${parameter.toUpperCase()}-restored stego`, pcmIdentical: result.pcmIdentical });
+          const variationOnPass = result.extractionStatus === "PASS" ? payloadVariation : null;
+          const bytesOnPass = result.extractionStatus === "PASS" ? messageBytes : null;
+          addComparison({ media, test: parameter, parameter: null, left: file, right: restoredFile, metrics: result.metrics, status: result.extractionStatus, comparison: `Original stego vs ${parameter.toUpperCase()}-restored stego`, pcmIdentical: result.pcmIdentical, payloadVariation: variationOnPass, messageBytes: bytesOnPass });
           if (coverFile) {
             const rawComparison = media === "image"
               ? await analyzeImage(coverFile, restoredFile)
               : await analyzeAudio(coverFile, restoredFile);
-            addComparison({ media, test: parameter, parameter: null, left: coverFile, right: restoredFile, metrics: rawComparison.metrics, status: result.extractionStatus, comparison: `Raw cover vs ${parameter.toUpperCase()}-restored stego`, pcmIdentical: result.pcmIdentical });
+            addComparison({ media, test: parameter, parameter: null, left: coverFile, right: restoredFile, metrics: rawComparison.metrics, status: result.extractionStatus, comparison: `Raw cover vs ${parameter.toUpperCase()}-restored stego`, pcmIdentical: result.pcmIdentical, payloadVariation: variationOnPass, messageBytes: bytesOnPass });
           }
           rows.push({ filename: file.name, media, format: parameter, parameter: null, result, status: result.extractionStatus === "PASS" ? "PASS" : result.extractionStatus === "FAIL" ? "FAIL" : "ERROR" });
         } catch (error) {
@@ -967,6 +992,8 @@ export function ForensicConsole() {
                 { key: "reference", header: "File B" },
                 { key: "media", header: "Media" },
                 { key: "codec", header: "Codec" },
+                { key: "variation", header: "% Kapasitas" },
+                { key: "messageBytes", header: "Ukuran Pesan (Byte)" },
                 { key: "mse", header: "MSE" },
                 { key: "psnr", header: "PSNR" },
                 { key: "mediaIntegrity", header: "Media identical" },
@@ -978,6 +1005,8 @@ export function ForensicConsole() {
                 reference: row.referenceFilename,
                 media: row.media.toUpperCase(),
                 codec: row.test === "baseline" ? "ORIGINAL" : row.test.toUpperCase(),
+                variation: row.payloadVariation ?? "N/A",
+                messageBytes: row.messageBytes ?? "N/A",
                 mse: row.metrics ? row.metrics.mse.toFixed(6) : row.mediaMeta ?? "N/A",
                 psnr: row.metrics ? (row.metrics.psnrDb == null ? "INF" : `${row.metrics.psnrDb.toFixed(2)} dB`) : "N/A",
                 mediaIntegrity: row.metrics ? (row.metrics.identical ? "YES" : "NO") : "N/A",

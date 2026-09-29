@@ -15,6 +15,7 @@ export interface ExportRow extends TestResult {
   comparison?: string | null;
   mediaMeta?: string | null;
   messageBytes?: number | null;
+  payloadVariation?: string | null;
   compressedFilename?: string | null;
   compressedBytes?: number | null;
   restoredFilename?: string | null;
@@ -45,7 +46,7 @@ function numericCell(value: number | null | undefined): number | string {
 
 function ratioCell(inputBytes: number, outputBytes: number | null): number | string {
   if (outputBytes == null || inputBytes === 0) return NA;
-  return outputBytes / inputBytes;
+  return Math.round((outputBytes / inputBytes) * 10000) / 100;
 }
 
 function safeText(value: string | null | undefined): string {
@@ -93,19 +94,18 @@ export async function buildXlsx(options: XlsxOptions): Promise<Blob> {
     { header: "filename", key: "filename", width: 28 },
     { header: "reference_file", key: "referenceFilename", width: 30 },
     { header: "compressed_file", key: "compressedFilename", width: 30 },
-    { header: "compressed_bytes", key: "compressedBytes", width: 18 },
     { header: "restored_file", key: "restoredFilename", width: 30 },
     { header: "restored_bytes", key: "restoredBytes", width: 18 },
     { header: "media_meta", key: "mediaMeta", width: 26 },
     { header: "message_bytes", key: "messageBytes", width: 14 },
+    { header: "payload_variation", key: "payloadVariation", width: 18 },
     { header: "test", key: "test", width: 12 },
-    { header: "parameter", key: "parameter", width: 12 },
     { header: "input_bytes", key: "inputBytes", width: 12 },
     { header: "output_bytes", key: "outputBytes", width: 12 },
-    { header: "size_ratio", key: "sizeRatio", width: 12 },
+    { header: "size_ratio_%", key: "sizeRatio", width: 14 },
     { header: "mse", key: "mse", width: 14 },
     { header: "psnr_db", key: "psnrDb", width: 12 },
-    { header: "pcm_identical", key: "pcmIdentical", width: 14 },
+    { header: "media_identical", key: "mediaIdentical", width: 14 },
     { header: "extraction_status", key: "extractionStatus", width: 16 },
     { header: "elapsed_ms", key: "elapsedMs", width: 12 },
     { header: "error_code", key: "errorCode", width: 18 },
@@ -119,19 +119,18 @@ export async function buildXlsx(options: XlsxOptions): Promise<Blob> {
       filename: safeText(row.filename),
       referenceFilename: safeText(row.referenceFilename),
       compressedFilename: safeText(row.compressedFilename),
-      compressedBytes: numericCell(row.compressedBytes),
       restoredFilename: safeText(row.restoredFilename),
       restoredBytes: numericCell(row.restoredBytes),
       mediaMeta: safeText(row.mediaMeta),
       messageBytes: numericCell(row.messageBytes),
+      payloadVariation: safeText(row.payloadVariation),
       test: row.test,
-      parameter: numericCell(row.parameter),
       inputBytes: numericCell(row.inputBytes),
       outputBytes: numericCell(row.outputBytes),
       sizeRatio: ratioCell(row.inputBytes, row.outputBytes),
       mse: row.metrics ? numericCell(row.metrics.mse) : NA,
       psnrDb: row.metrics ? psnrCell(row.metrics.psnrDb) : NA,
-      pcmIdentical: boolCell(row.pcmIdentical),
+      mediaIdentical: boolCell(row.metrics?.identical),
       extractionStatus: row.extractionStatus,
       elapsedMs: numericCell(row.elapsedMs),
       errorCode: safeText(row.errorCode),
@@ -150,19 +149,18 @@ export async function buildXlsx(options: XlsxOptions): Promise<Blob> {
     ["comparison", "Pair label: Raw cover vs original stego; Raw cover vs codec-restored stego; or Original stego vs codec-restored stego."],
     ["reference_file", "Second media filename compared with filename."],
     ["compressed_file", "Intermediate compressed artifact produced by the selected attack."],
-    ["compressed_bytes", "Compressed artifact size in bytes."],
     ["restored_file", "Restored PNG or WAV artifact used for the final extraction."],
     ["restored_bytes", "Restored artifact size in bytes."],
     ["media_meta", "Image dimensions or audio sample rate/channels/frames/bit depth."],
     ["message_bytes", "UTF-8 byte length of the embedded plaintext, when known."],
+    ["payload_variation", "Percentage of the media capacity occupied by the embedded message (e.g. 0.07%)."],
     ["test", "baseline, jpeg, webp, flac, or mp3."],
-    ["parameter", "Reserved for test parameters; compression format is recorded in the test column."],
     ["input_bytes", "Size of the input media in bytes."],
     ["output_bytes", "Size of the output (JPEG, WebP, FLAC, or MP3) media in bytes."],
-    ["size_ratio", "output_bytes / input_bytes."],
+    ["size_ratio_%", "output_bytes / input_bytes, expressed as a percentage."],
     ["mse", "Mean squared error. 0 means identical."],
     ["psnr_db", "Peak signal-to-noise ratio in dB. INF means identical."],
-    ["pcm_identical", "Audio only: whether PCM samples are byte-identical after round-trip."],
+    ["media_identical", "Whether the two compared media are identical (MSE = 0)."],
     ["extraction_status", "PASS, FAIL (message), ERROR (execution), or NOT_RUN."],
     ["elapsed_ms", "Wall time of the experiment step in milliseconds."],
     ["error_code", "Machine-readable error code, or N/A."],
